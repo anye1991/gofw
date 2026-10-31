@@ -1,0 +1,150 @@
+# netfw 网络层防火墙 - 示例规则集
+# 字段说明:
+#   action:    ACCEPT | DROP | REJECT | LOG
+#   src_ip:    IP 或 CIDR（支持逗号列表），默认 any
+#   dst_ip:    同上
+#   src_mac:   源 MAC 地址（逗号列表），默认 any
+#   dst_mac:   目的 MAC 地址，默认 any
+#   protocol:  tcp | udp | icmp | icmpv6 | any
+#   src_port:  单值 / 范围(1024-65535) / 列表(80,443)
+#   dst_port:  同上
+#   tcp_flags: syn / ack / fin / rst / psh / urg（可组合，支持 set/mask）
+#   direction: in | out | any
+#   state:     new | established | related | invalid
+#   vlan:      VLAN ID (1-4094)
+#   time:      HH:MM-HH:MM [mon,tue,...]（如 "09:00-18:00 mon-fri"）
+#   rate_limit: 每秒包数（令牌桶速率）
+#   burst:     突发包数（默认等于 rate_limit）
+#   per_src:   true/false，按源 IP 分别限流
+#   ip_group:  引用 ip_groups 中定义的地址簿
+#   nat:       NAT 规则 {type: snat|dnat|masquerade, to_src_ip, to_src_port, to_dst_ip, to_dst_port}
+#   comment:   备注
+#
+# 匹配规则：自上而下首条命中胜出。建议顺序：显式 DROP -> 业务 ACCEPT -> catch-all。
+
+default: drop
+
+# 地址簿（IP 组），可在规则中通过 ip_group 引用
+ip_groups:
+  trusted_hosts: "10.0.0.0/24,192.168.1.100"
+  web_servers: "10.0.0.10,10.0.0.11"
+  admin_net: "10.0.0.0/24"
+
+rules:
+  # ---- 显式拒绝（放最前面） ----
+
+  # 阻止特定恶意 IP 段
+  - action: DROP
+    src_ip: 203.0.113.0/24
+    comment: block known-bad network
+
+  # 阻止异常 TCP 标志位组合（Xmas scan 等）
+  - action: DROP
+    protocol: tcp
+    tcp_flags:
+      set: fin,psh,urg
+      mask: fin,psh,urg
+    comment: block xmas scan
+
+  # 按 MAC 地址阻止特定设备
+  - action: DROP
+    src_mac: "00:11:22:33:44:55"
+    comment: block by MAC
+
+  # ---- 放行已建立连接 ----
+  - action: ACCEPT
+    state: established
+    comment: allow established connections
+
+  # ---- 放行回环 ----
+  - action: ACCEPT
+    src_ip: 127.0.0.0/8
+    dst_ip: 127.0.0.0/8
+    comment: loopback
+
+  # ---- 入站服务 ----
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: 22
+    direction: in
+    comment: inbound SSH
+
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: 80,443
+    direction: in
+    comment: inbound web
+
+  - action: ACCEPT
+    protocol: icmp
+    direction: in
+    comment: inbound ICMP
+
+  # 仅允许地址簿中的可信主机访问 SSH
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: 22
+    ip_group: admin_net
+    direction: in
+    comment: SSH from admin net only
+
+  # VLAN 隔离：仅 VLAN 10 可访问数据库端口
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: 3306
+    vlan: 10
+    direction: in
+    comment: MySQL only from VLAN 10
+
+  # 工作时间才允许的内部服务（09:00-18:00 周一至周五）
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: 8080
+    time: "09:00-18:00 mon,tue,wed,thu,fri"
+    direction: in
+    comment: internal app during work hours
+
+  # 速率限制：入站 SSH 每秒最多 5 个新连接，按源 IP 分别计数
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: 22
+    direction: in
+    rate_limit: 5
+    burst: 10
+    per_src: true
+    comment: rate-limit SSH (5/s per source)
+
+  # 出站服务 ----
+  - action: ACCEPT
+    protocol: udp
+    dst_port: 53
+    direction: out
+    comment: outbound DNS
+
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: 80,443
+    direction: out
+    comment: outbound web
+
+  # ---- NAT 规则 ----
+  # 出站伪装（共享上网）
+  - action: ACCEPT
+    src_ip: 10.0.0.0/24
+    nat:
+      type: masquerade
+    comment: masquerade outbound
+
+  # DNAT：将公网 80 端口映射到内网 Web 服务器
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: 80
+    nat:
+      type: dnat
+      to_dst_ip: 10.0.0.10
+      to_dst_port: 80
+    comment: DNAT public:80 -> 10.0.0.10:80
+
+  # ---- catch-all 拒绝（不匹配则走 default DROP） ----
+  - action: REJECT
+    comment: reject unmatched with RST/ICMP

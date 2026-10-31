@@ -1,0 +1,29 @@
+# 二进制产物
+gofw
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# 测试二进制
+*.test
+
+# 构建输出
+/build/
+/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 本地配置（含密钥，勿提交）
+*.local.yaml
+*.local.yml
+secrets.*
