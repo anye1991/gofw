@@ -34,3 +34,9 @@ go vet ./...
 go test -race -count=1 ./...
 go run ./cmd/verify
 ```
+
+## 作者
+
+- **署名**：暗夜铭少
+- **官网**：[https://waf.duduziy.com](https://waf.duduziy.com)
+- **邮件**：[azgq@foxmail.com](mailto:azgq@foxmail.com)
