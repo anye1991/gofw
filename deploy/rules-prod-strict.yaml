@@ -1,0 +1,125 @@
+# gofw 生产规则 · 阿里云 ECS · 严格模式 (default: drop)
+# 定位: 作为现有 UFW/iptables 之上的【默认拒绝增强层】
+#   与 rules-prod.yaml(默认 accept) 的区别: 未显式放行的流量一律 DROP。
+#
+# ⚠️ 关键约束: 本引擎的 default 动作会同时套用到 input / output / forward 三条链。
+#   因此"默认拒绝"若只配入站, 出方向也会被掐断(DNS 上游 / NTP / apt / 云厂商内部通信)。
+#   所以下面【出方向(forward/out)】也必须显式放行必要流量, 否则服务器半残。
+#
+# 设计原则:
+#   1) established/related + loopback 全链首行放行 —— 保证已建会话与回环不被误伤
+#   2) 入站白名单: 仅开放真正对外需要的端口 (SSH/Web/宝塔/MySQL), 其余 DROP
+#   3) 出方向白名单: DNS(53)/NTP(123)/HTTP-HTTPS(80,443)/阿里云内部(100.100.0.0/16)
+#      其余出方向 DROP —— 即便如此, 普通出网(apt/curl/API)仍可工作
+#   4) 末端保留精确阻断: 恶意网段 / Xmas 扫描 / Web 单源并发限制
+
+default: drop
+
+# 地址簿（IP 组），可在规则中通过 ip_group 引用
+ip_groups:
+  admin_cidrs: "127.0.0.1/32"
+  web_servers: "127.0.0.1/32"
+
+rules:
+  # ============ 通用首行: 已建会话 + 回环 (全链, 防误伤) ============
+  - action: ACCEPT
+    state: established
+    comment: allow established/related (all chains)
+  - action: ACCEPT
+    src_ip: 127.0.0.0/8
+    dst_ip: 127.0.0.0/8
+    comment: loopback (all chains)
+
+  # ============ 入站白名单 (direction: in) ============
+  # 入站 ICMP (ping / PMTU)
+  - action: ACCEPT
+    protocol: icmp
+    direction: in
+    comment: inbound icmp
+
+  # 入站 SSH (带每秒限速, 按源独立计数器, 防爆破)
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: 22
+    direction: in
+    rate_limit: 5
+    burst: 10
+    per_src: true
+    comment: inbound SSH (5/s per source)
+
+  # 入站 Web (nginx 对外 80/443 tcp + 443 udp/QUIC)
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: "80,443"
+    direction: in
+    comment: inbound http/https (tcp)
+  - action: ACCEPT
+    protocol: udp
+    dst_port: 443
+    direction: in
+    comment: inbound https/quic (udp)
+
+  # 宝塔面板端口
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: "888,18706"
+    direction: in
+    comment: baota panel ports
+
+  # MySQL (当前 *:3306 全网卡监听, 按需求对外暴露)
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: 3306
+    direction: in
+    comment: inbound mysql (3306)
+
+  # ============ 出方向白名单 (direction: out) ============
+  # DNS 上游 (systemd-resolved 经本机 stub 127.0.0.53 转发到真实 DNS)
+  - action: ACCEPT
+    protocol: udp
+    dst_port: 53
+    direction: out
+    comment: outbound dns (udp)
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: 53
+    direction: out
+    comment: outbound dns (tcp)
+  # NTP 时间同步
+  - action: ACCEPT
+    protocol: udp
+    dst_port: 123
+    direction: out
+    comment: outbound ntp
+  # 通用出网 (apt / curl / Webhook / 证书签发 等)
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: "80,443"
+    direction: out
+    comment: outbound http/https
+  # 阿里云内部服务 (元数据 / 云助手 / 监控 等 100.100.0.0/16)
+  - action: ACCEPT
+    dst_ip: 100.100.0.0/16
+    direction: out
+    comment: outbound aliyun internal (100.100.0.0/16)
+
+  # ============ 末端精确阻断 (无方向 → 三条链都生效) ============
+  # 已知恶意网段
+  - action: DROP
+    src_ip: 203.0.113.0/24
+    comment: block known-bad CIDR
+  # Xmas 扫描特征 (FIN+PSH+URG 同时置位)
+  - action: DROP
+    protocol: tcp
+    tcp_flags:
+      set: fin,psh,urg
+      mask: fin,psh,urg
+    comment: block xmas scan
+  # 单源对 Web 的并发连接数限制 (防单 IP 打满)
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: "80,443"
+    direction: in
+    conn_limit: 200
+    per_src: true
+    comment: per-source concurrency limit to web (200)
