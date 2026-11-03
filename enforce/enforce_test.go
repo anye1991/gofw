@@ -1,6 +1,7 @@
 package enforce
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -159,3 +160,49 @@ func TestBuildScriptGeoIPNoDBSkipped(t *testing.T) {
 		t.Errorf("without GeoIP DB, geoip rule must be skipped, got:\n%s", script)
 	}
 }
+
+// 加载外部 CSV（模拟全国家库）后，geoip 规则应把该国的全部 CIDR 正确灌进
+// 对应的命名集合，并生成引用该集合的内核规则。验证"全国家"路径在生成层正确。
+func TestBuildScriptGeoIPFromCSVLibrary(t *testing.T) {
+	csv := "5.255.192.0/18,RU\n" +
+		"95.213.0.0/16,RU\n" +
+		"178.176.0.0/13,RU\n" +
+		"1.2.3.0/24,CN\n" +
+		"9.9.9.0/24,CN\n"
+	dir := t.TempDir()
+	path := dir + "/geoip.csv"
+	if err := os.WriteFile(path, []byte(csv), 0644); err != nil {
+		t.Fatal(err)
+	}
+	db := geoip.New()
+	if err := db.LoadFromCSV(path); err != nil {
+		t.Fatal(err)
+	}
+	if db.Count() != 5 {
+		t.Fatalf("expected 5 entries, got %d", db.Count())
+	}
+
+	rs := rules.NewRuleSet()
+	rs.Add(&rules.Rule{Action: rules.ActionDrop, GeoIP: rules.ParseGeoIPSpec("RU"), Direction: rules.DirIn})
+	n := &NftablesEnforcer{geoDB: db}
+	script := n.buildScript(rs)
+	t.Log(script)
+
+	if !strings.Contains(script, "set geoip_RU {") {
+		t.Fatal("missing set geoip_RU definition")
+	}
+	if !strings.Contains(script, "ip saddr != @geoip_RU drop") {
+		t.Fatalf("expected 'ip saddr != @geoip_RU drop', got:\n%s", script)
+	}
+	// RU 的三条 CIDR 必须都作为集合元素出现
+	for _, c := range []string{"5.255.192.0/18", "95.213.0.0/16", "178.176.0.0/13"} {
+		if !strings.Contains(script, c) {
+			t.Errorf("RU CIDR %s missing from geoip_RU set, got:\n%s", c, script)
+		}
+	}
+	// 集合必须按国家隔离：CN 的 CIDR 不得出现在 geoip_RU 集合里
+	if strings.Contains(script, "geoip_RU") && strings.Contains(script, "9.9.9.0/24") {
+		t.Errorf("CN CIDR leaked into geoip_RU set, got:\n%s", script)
+	}
+}
+
