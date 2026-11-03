@@ -310,6 +310,14 @@ func (n *NftablesEnforcer) ruleToNft(r *rules.Rule, chain string) string {
 	}
 	var matchers []string
 
+	// VLAN 标签匹配必须显式前置 "ether type vlan"，且位于 L3/L4 匹配之前。
+	// 否则 nftables 会把同规则的 ip/tcp 等 L3/L4 匹配解析为 ether→ip 直接依赖，
+	// 与 ether→vlan 依赖冲突，报 "conflicting protocols specified: ether vs. vlan"，
+	// 导致整份规则集原子替换失败、gofw 进程退出（如 rules.yaml 的 "MySQL only from VLAN 10"）。
+	if r.VLAN != nil {
+		matchers = append(matchers, "ether type vlan", fmt.Sprintf("vlan id %d", *r.VLAN))
+	}
+
 	if r.Protocol != nil {
 		proto := protoName(*r.Protocol)
 		hasL4 := false
@@ -356,9 +364,6 @@ func (n *NftablesEnforcer) ruleToNft(r *rules.Rule, chain string) string {
 	}
 	if r.DstMAC != nil && r.DstMAC.String() != "any" {
 		matchers = append(matchers, "ether daddr "+r.DstMAC.String())
-	}
-	if r.VLAN != nil {
-		matchers = append(matchers, fmt.Sprintf("vlan id %d", *r.VLAN))
 	}
 	isV6 := ruleIsIPv6(r)
 	fam := "ip"
