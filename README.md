@@ -42,6 +42,10 @@
 | 🔀 **NAT 网络地址转换** | SNAT / DNAT / Masquerade |
 | 🤝 **高可用 VRRP** | VRRPv2 主备选举、VIP 自动漂移，无权限时回退 TCP 探测 |
 | 🖥️ **Web 管理界面** | 全字段规则编辑器、地址簿管理、能力中心、实时流量与连接统计 |
+| 🔔 **告警通知** | Webhook（Slack / 钉钉 / 通用）与 SMTP 邮件，按丢弃速率阈值触发 |
+| 📡 **数据包捕获** | 基于 AF_PACKET 高性能抓包（混杂模式），供 DPI 与流量分析 |
+| 🔗 **连接跟踪** | 连接表与 TCP 状态机、IP 分片重组、老化回收 |
+| 🌐 **网关模式** | `--gateway` 开启 IP 转发 + 多网卡抓包，可工作在网络网关位置 |
 
 ---
 
@@ -84,7 +88,7 @@ flowchart LR
 ## 📦 核心功能
 
 ### 规则匹配
-支持多维度包过滤：
+规则动作支持 `accept`（放行）/ `drop`（丢弃）/ `reject`（拒绝并回 RST/ICMP）/ `log`（仅记录），支持多维度包过滤：
 
 | 维度 | 可匹配字段 |
 | :--- | :--- |
@@ -133,6 +137,34 @@ flowchart LR
 - 🎛️ **能力中心**：`/api/system` 暴露引擎能力与运行模式
 - 📊 **实时统计**：流量计数、连接状态、拦截日志实时面板
 - 🔌 **即时下发**：规则增删改经 REST API 即时热应用到内核
+
+### 告警通知
+通过 `--alert alert.yaml` 启用，支持两类通道，**按丢弃速率阈值（`CheckDropRate`）自动触发告警事件**：
+- **Webhook**：`generic` / `slack` / `dingtalk` 三种格式，推送 JSON 告警到指定 URL
+- **邮件**：SMTP 协议，支持多人收件
+
+示例 `alert.yaml`：
+
+```yaml
+webhook_url: https://hooks.slack.com/services/XXX
+webhook_type: slack          # generic / slack / dingtalk
+email:
+  smtp_host: smtp.example.com
+  smtp_port: 587
+  username: alert@example.com
+  password: xxxxxx
+  to:
+    - admin@example.com
+```
+
+### 数据包捕获
+基于 `AF_PACKET` raw socket 实现**高性能抓包**（混杂模式），单网卡 `capture.New` 或多网卡 `capture.NewMulti`，抓到的包通过 channel 供 DPI 与流量分析使用，是引擎做应用层识别的数据来源之一。
+
+### 连接跟踪
+`engine.ConnectionTracker` 维护连接表与 **TCP 状态机**，自动老化回收（`sweep`）；`FragReassembler` 负责 **IP 分片重组**。连接表可通过 Web UI 或 `gofw conns list` 实时查看。
+
+### 网关模式
+`--gateway` 启动参数会开启 **IP 转发**并对接 `capture` 抓包，使 gofw 可工作在网络**网关 / 旁路**位置，对转发流量做过滤与 DPI。
 
 ---
 
@@ -248,6 +280,56 @@ nat:
 > ⚠️ **严格模式提示**：`default: drop` 会**同时套用到 input / output / forward 三链**，
 > 切之前务必把对外端口与必要出方向（DNS / NTP / 云厂商内部段）补进白名单，避免锁死服务器。
 > 详见 [deploy/README.md](deploy/README.md)。
+
+---
+
+## 💻 命令行参考
+
+### 子命令
+
+| 命令 | 说明 |
+|------|------|
+| `gofw start -r rules.yaml [options]` | 启动防火墙引擎（真·下发内核 nftables） |
+| `gofw rules list -r rules.yaml` | 列出全部规则 |
+| `gofw rules stats [--ctl-sock PATH]` | 查看规则命中统计 |
+| `gofw rules add -r rules.yaml <action> [字段...]` | 新增一条规则 |
+| `gofw rules del -r rules.yaml <index>` | 删除指定索引规则 |
+| `gofw conns list [--ctl-sock PATH]` | 查看当前连接跟踪表 |
+| `gofw reload [--ctl-sock PATH]` | 热重载规则（无需重启） |
+| `gofw test -r rules.yaml <hex_frame>` | 用十六进制报文帧测试规则匹配 |
+
+### 关键启动参数（start）
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `-r, --rules` | —（必填） | 规则文件路径 |
+| `-i, --interface` | `eth0` | 监听网卡 |
+| `--monitor` | `false` | 监控模式，只记录不下发内核 |
+| `--workers` | CPU 核数 | 工作线程数 |
+| `--stats-interval` | `0` | 统计输出间隔（秒） |
+| `--ctl-sock` | `/tmp/gofw.sock` | 控制套接字路径，供 `conns` / `stats` / `reload` 运行时查询 |
+| `--gateway` | `false` | 网关模式：开启 IP 转发 + 多网卡抓包 |
+| `--web` | — | Web 管理界面监听地址，如 `:8080` |
+| `--ha` | — | VRRP 高可用配置文件 |
+| `--alert` | — | 告警配置文件（见上文「告警通知」） |
+| `--log-file` | — | 日志文件路径（同时输出到 stderr） |
+
+### 示例
+
+```bash
+# 真引擎启动 + Web 管理 + 告警
+sudo ./gofw start -r rules.yaml -i eth0 --web :8080 --alert alert.yaml
+
+# 网关模式（转发过滤）
+sudo ./gofw start -r rules.yaml --gateway --web :8080
+
+# 运行时查看连接表 / 热重载
+gofw conns list
+gofw reload
+
+# 命令行新增一条阻断规则
+gofw rules add -r rules.yaml drop -p tcp --dst-port 3306 --comment "block mysql"
+```
 
 ---
 
