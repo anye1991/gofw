@@ -1,0 +1,84 @@
+# gofw 生产规则 · 阿里云 ECS 适配
+# 定位: 作为现有 UFW/iptables 之上的【增强阻断层】
+#   default: accept → 本表只做"精确阻断 + 显式放行"，不叠加 DROP 现有已放行的流量
+#           (避免和 UFW/iptables 叠加后把 SSH/宝塔/MySQL 等掐断)
+# 真正下发的规则: 恶意网段/扫描特征/异常标志位的 DROP，以及 SSH 限速、Web 并发限制等
+#
+# 字段说明见仓库根 rules.yaml 注释。下面仅保留云机适用的部分，去掉了示例里
+# 的 masquerade / dnat 10.0.0.x（那是内网网关假设，云机用不上，且会把 80 转丢）。
+
+default: accept
+
+# 地址簿（IP 组），可在规则中通过 ip_group 引用
+ip_groups:
+  # 你的管理员来源网段（按需替换）。留空则不限制 SSH 来源（由 UFW 的 ysl_admin4 兜底）
+  admin_cidrs: "127.0.0.1/32"
+  web_servers: "127.0.0.1/32"
+
+rules:
+  # ---- 已建立连接优先放行（防止误断活跃会话 / 正在使用的 SSH） ----
+  - action: ACCEPT
+    state: established
+    comment: allow established/related
+
+  # ---- 回环 ----
+  - action: ACCEPT
+    src_ip: 127.0.0.0/8
+    dst_ip: 127.0.0.0/8
+    comment: loopback
+
+  # ---- 入站 ICMP（ping / 路径 MTU 等） ----
+  - action: ACCEPT
+    protocol: icmp
+    direction: in
+    comment: inbound icmp
+
+  # ---- 入站 SSH（带每秒限速，按源独立计数器，防爆破） ----
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: 22
+    direction: in
+    rate_limit: 5
+    burst: 10
+    per_src: true
+    comment: inbound SSH (5/s per source)
+
+  # ---- 入站 Web（nginx 对外 80/443） ----
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: "80,443"
+    direction: in
+    comment: inbound http/https
+
+  # ---- 宝塔面板端口 ----
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: "888,18706"
+    direction: in
+    comment: baota panel ports
+
+  # ==================== 以下为真正生效的精确阻断 ====================
+
+  # 已知恶意网段（示例，可替换为真实威胁情报）
+  - action: DROP
+    src_ip: 203.0.113.0/24
+    comment: block known-bad CIDR
+
+  # Xmas 扫描特征（FIN+PSH+URG 同时置位）
+  - action: DROP
+    protocol: tcp
+    tcp_flags:
+      set: fin,psh,urg
+      mask: fin,psh,urg
+    comment: block xmas scan
+
+  # 单源对 Web 的并发连接数限制（防单 IP 打满，演示 conn_limit）
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: "80,443"
+    conn_limit: 200
+    per_src: true
+    comment: per-source concurrency limit to web (200)
+
+  # （如需 GeoIP / DPI / 时段 等高级规则，可在 Web 面板直接添加；
+  #   例如: action DROP, geoip "deny:XX"，或 app_proto 限制协议）
