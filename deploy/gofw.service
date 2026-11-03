@@ -1,0 +1,23 @@
+[Unit]
+Description=gofw 网络层防火墙 (真下发引擎)
+Documentation=https://gitee.com/nights-shadow/fhq
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/gofw/start-gofw.sh
+Restart=on-failure
+RestartSec=5
+User=root
+# 以 root 运行: 需内核级权限下发 nftables 规则 + 在 eth0 旁路抓包
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Web 登录密码: 生产环境务必替换为强密码 (由 systemd 注入, 不入库); 留空则 Web 无鉴权
+Environment=GOFW_WEB_PASSWORD=__CHANGE_ME_ON_SERVER__
+# 限制内存, 避免抓包队列失控
+MemoryMax=256M
+# 正常停止时清空本表规则( enf.Flush ), 恢复至部署前状态
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
