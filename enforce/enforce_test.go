@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"gofw/config"
+	"gofw/geoip"
 	"gofw/rules"
 )
 
@@ -69,5 +70,92 @@ func TestRuleToNftPlainTCPNoVLAN(t *testing.T) {
 	}
 	if !strings.Contains(got, "tcp dport 443 accept") {
 		t.Errorf("plain TCP rule = %q", got)
+	}
+}
+
+// GeoIP deny 模式（geoip: RU）+ drop：入站应编译为 "ip saddr != @geoip_RU drop"，
+// 与用户态 GeoIPSpec.Matches 的 "!inList" 语义一致。
+func TestBuildScriptGeoIPDeny(t *testing.T) {
+	db := geoip.NewWithBuiltin()
+	rs := rules.NewRuleSet()
+	rs.Add(&rules.Rule{Action: rules.ActionDrop, GeoIP: rules.ParseGeoIPSpec("RU"), Direction: rules.DirIn})
+	n := &NftablesEnforcer{geoDB: db}
+	script := n.buildScript(rs)
+	t.Log(script)
+	if !strings.Contains(script, "set geoip_RU {") {
+		t.Error("missing geoip_RU set definition")
+	}
+	if !strings.Contains(script, "type ipv4_addr") || !strings.Contains(script, "flags interval") {
+		t.Error("geoip set must be type ipv4_addr; flags interval")
+	}
+	if !strings.Contains(script, "ip saddr != @geoip_RU drop") {
+		t.Errorf("deny geoip should compile to 'ip saddr != @geoip_RU drop', got:\n%s", script)
+	}
+}
+
+// GeoIP allow 模式（geoip: allow:CN）+ drop：入站应编译为 "ip saddr @geoip_CN drop"。
+func TestBuildScriptGeoIPAllow(t *testing.T) {
+	db := geoip.NewWithBuiltin()
+	rs := rules.NewRuleSet()
+	rs.Add(&rules.Rule{Action: rules.ActionDrop, GeoIP: rules.ParseGeoIPSpec("allow:CN"), Direction: rules.DirIn})
+	n := &NftablesEnforcer{geoDB: db}
+	script := n.buildScript(rs)
+	t.Log(script)
+	if !strings.Contains(script, "ip saddr @geoip_CN drop") {
+		t.Errorf("allow geoip should compile to 'ip saddr @geoip_CN drop', got:\n%s", script)
+	}
+}
+
+// 出站 geoip 应改用 ip daddr（目标国家），与入站源国家区分。
+func TestBuildScriptGeoIPOutboundUsesDaddr(t *testing.T) {
+	db := geoip.NewWithBuiltin()
+	rs := rules.NewRuleSet()
+	rs.Add(&rules.Rule{Action: rules.ActionDrop, GeoIP: rules.ParseGeoIPSpec("RU"), Direction: rules.DirOut})
+	n := &NftablesEnforcer{geoDB: db}
+	script := n.buildScript(rs)
+	t.Log(script)
+	if !strings.Contains(script, "ip daddr != @geoip_RU drop") {
+		t.Errorf("outbound geoip should use 'ip daddr', got:\n%s", script)
+	}
+}
+
+// 多国家 OR（geoip: CN,US）应合并进同一集合 geoip_CN_US。
+func TestBuildScriptGeoIPMultiCountry(t *testing.T) {
+	db := geoip.NewWithBuiltin()
+	rs := rules.NewRuleSet()
+	rs.Add(&rules.Rule{Action: rules.ActionDrop, GeoIP: rules.ParseGeoIPSpec("CN,US"), Direction: rules.DirIn})
+	n := &NftablesEnforcer{geoDB: db}
+	script := n.buildScript(rs)
+	t.Log(script)
+	if !strings.Contains(script, "set geoip_CN_US {") {
+		t.Error("multi-country rule should produce set geoip_CN_US")
+	}
+	if !strings.Contains(script, "ip saddr != @geoip_CN_US drop") {
+		t.Errorf("multi-country deny should compile to 'ip saddr != @geoip_CN_US drop', got:\n%s", script)
+	}
+}
+
+// 引用库中不存在的国家（ZZ）必须跳过该规则，不能生成空集合（否则 "!=" 取反会误杀全网）。
+func TestBuildScriptGeoIPUnknownCountrySkipped(t *testing.T) {
+	db := geoip.NewWithBuiltin()
+	rs := rules.NewRuleSet()
+	rs.Add(&rules.Rule{Action: rules.ActionDrop, GeoIP: rules.ParseGeoIPSpec("ZZ"), Direction: rules.DirIn})
+	n := &NftablesEnforcer{geoDB: db}
+	script := n.buildScript(rs)
+	t.Log(script)
+	if strings.Contains(script, "geoip_ZZ") {
+		t.Error("unknown country must not be compiled (no set, no matcher)")
+	}
+}
+
+// 未注入 GeoIP 库时，geoip 规则整条跳过且不应出现在脚本里（避免误拦截）。
+func TestBuildScriptGeoIPNoDBSkipped(t *testing.T) {
+	rs := rules.NewRuleSet()
+	rs.Add(&rules.Rule{Action: rules.ActionDrop, GeoIP: rules.ParseGeoIPSpec("RU"), Direction: rules.DirIn})
+	n := &NftablesEnforcer{} // 无 geoDB
+	script := n.buildScript(rs)
+	t.Log(script)
+	if strings.Contains(script, "@geoip_RU") {
+		t.Errorf("without GeoIP DB, geoip rule must be skipped, got:\n%s", script)
 	}
 }

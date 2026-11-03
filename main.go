@@ -131,19 +131,21 @@ func cmdStart(args []string) int {
 
 	// GeoIP 数据库加载（优先外部 CSV，否则使用内置国家库）
 	geoPath := rulesFile + ".geoip"
+	var geoDB *geoip.DB
 	if _, err := os.Stat(geoPath); err == nil {
 		db := geoip.New()
 		if err := db.LoadFromCSV(geoPath); err != nil {
 			log.Printf("warning: geoip load failed: %v", err)
 		} else {
+			geoDB = db
 			eng.SetGeoIP(db)
 			log.Printf("geoip loaded from %s: %d entries", geoPath, db.Count())
 		}
 	} else {
 		// 无外部 CSV，加载内置国家库
-		db := geoip.NewWithBuiltin()
-		eng.SetGeoIP(db)
-		log.Printf("geoip builtin loaded: %d entries", db.Count())
+		geoDB = geoip.NewWithBuiltin()
+		eng.SetGeoIP(geoDB)
+		log.Printf("geoip builtin loaded: %d entries", geoDB.Count())
 	}
 
 	// 告警管理器
@@ -176,6 +178,9 @@ func cmdStart(args []string) int {
 	}
 
 	enf := enforce.BuildEnforcer(!monitor)
+	if g, ok := enf.(*enforce.NftablesEnforcer); ok && geoDB != nil {
+		g.SetGeoIP(geoDB)
+	}
 	if !enf.Apply(rs) {
 		log.Printf("failed to apply ruleset to enforcer")
 		return 1

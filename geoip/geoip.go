@@ -119,6 +119,38 @@ func (db *DB) Loaded() bool {
 	return db.loaded
 }
 
+// CIDRsForCountry 返回指定国家码的全部 CIDR 字符串（已按字典序去重排序）。
+// 供执行层（enforce）把国家网段编译为内核匹配集合。
+// 若国家码为空、库未加载或该国家不存在，返回 nil。
+func (db *DB) CIDRsForCountry(code string) []string {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if code == "" {
+		return nil
+	}
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	if !db.loaded {
+		return nil
+	}
+	var out []string
+	for _, e := range db.entries {
+		if e.country == code {
+			out = append(out, e.network.String())
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	ded := out[:1]
+	for _, s := range out[1:] {
+		if s != ded[len(ded)-1] {
+			ded = append(ded, s)
+		}
+	}
+	return ded
+}
+
 // Count 返回数据库条目数。
 func (db *DB) Count() int {
 	db.mu.RLock()

@@ -6,12 +6,21 @@ import (
 	"log"
 	"net"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"gofw/engine"
+	"gofw/geoip"
 	"gofw/packet"
 	"gofw/rules"
 )
+
+// geoRuleInfo 一条 geoip 规则在内核侧的编译结果。
+type geoRuleInfo struct {
+	setName string // nftables 集合名，如 geoip_RU / geoip_CN_US
+	negate  bool   // deny 模式为 true：匹配"不属于集合"（ip saddr != @set）
+	skip    bool   // 引用的国家库里无数据，整条规则跳过并告警
+}
 
 // Enforcer 执行后端接口。
 type Enforcer interface {
@@ -74,6 +83,11 @@ func ruleStr(r *rules.Rule) string {
 type NftablesEnforcer struct {
 	nftPath string
 	avail   *bool
+	geoDB   *geoip.DB // GeoIP 库，用于把国家码编译成内核集合
+
+	// 以下两字段仅在 buildScript 单次调用期间有效，用于 ruleToNft 复用预编译结果
+	geoSets map[string][]string
+	geoInfo map[*rules.Rule]*geoRuleInfo
 }
 
 func (n *NftablesEnforcer) Name() string { return "NftablesEnforcer" }
@@ -97,6 +111,12 @@ func (n *NftablesEnforcer) Available() bool {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// SetGeoIP 注入 GeoIP 库，使 geoip 规则能被编译进内核匹配集合。
+// 不调用则不编译 geoip（相关规则在 buildScript 时被跳过并告警）。
+func (n *NftablesEnforcer) SetGeoIP(db *geoip.DB) {
+	n.geoDB = db
+}
 
 func (n *NftablesEnforcer) Apply(rs *rules.RuleSet) bool {
 	if !n.Available() {
@@ -142,9 +162,34 @@ func (n *NftablesEnforcer) buildScript(rs *rules.RuleSet) string {
 	if rs.DefaultAction == rules.ActionAccept {
 		def = "accept"
 	}
+
+	// 预编译 geoip 规则：把规则里出现的国家码编译成内核集合
+	n.geoSets, n.geoInfo = n.compileGeoIP(rs)
+	defer func() {
+		n.geoSets = nil
+		n.geoInfo = nil
+	}()
+
 	var sb strings.Builder
 	// filter 表
 	sb.WriteString("table inet gofw {\n")
+
+	// GeoIP 命名集合（type ipv4_addr; flags interval），须在引用它的链之前声明
+	if len(n.geoSets) > 0 {
+		names := make([]string, 0, len(n.geoSets))
+		for name := range n.geoSets {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			sb.WriteString(fmt.Sprintf("    set %s {\n", name))
+			sb.WriteString("        type ipv4_addr\n")
+			sb.WriteString("        flags interval\n")
+			sb.WriteString("        elements = { " + strings.Join(n.geoSets[name], ", ") + " }\n")
+			sb.WriteString("    }\n")
+		}
+	}
+
 	sb.WriteString("    chain input {\n")
 	sb.WriteString(fmt.Sprintf("        type filter hook input priority 0; policy %s;\n", def))
 	for _, r := range rs.Rules {
@@ -185,6 +230,80 @@ func (n *NftablesEnforcer) buildScript(rs *rules.RuleSet) string {
 	// nat 表（IPv6）
 	n.writeNATTable(&sb, rs, "ip6", true)
 	return sb.String()
+}
+
+// compileGeoIP 预扫描规则集，把每条 geoip 规则编译成内核集合信息。
+// 返回的 geoSets 为 集合名 -> 元素(CIDR)列表；geoInfo 为 规则 -> 编译结果。
+// 语义与用户态 engine 的 GeoIPSpec.Matches 完全一致：
+//   - deny 模式（如 geoip: RU）：匹配"不属于列表国家" → 内核 matcher 用 "!=" 取反
+//   - allow 模式（如 geoip: allow:CN）：匹配"属于列表国家" → 内核 matcher 直接命中
+// 若规则引用的国家在本机 GeoIP 库里没有任何网段，则整条规则跳过并告警，
+// 避免生成空集合导致 "ip saddr != @空集" 命中全部流量而误杀全网。
+func (n *NftablesEnforcer) compileGeoIP(rs *rules.RuleSet) (map[string][]string, map[*rules.Rule]*geoRuleInfo) {
+	sets := map[string][]string{}
+	info := map[*rules.Rule]*geoRuleInfo{}
+
+	hasDB := n.geoDB != nil && n.geoDB.Loaded()
+	for _, r := range rs.Rules {
+		if r.GeoIP == nil || !r.GeoIP.Enabled() {
+			continue
+		}
+		if !hasDB {
+			log.Printf("[geoip] WARN: GeoIP 库未加载，跳过规则: %s", r.String())
+			info[r] = &geoRuleInfo{skip: true}
+			continue
+		}
+		codes := sortedCountryCodes(r.GeoIP)
+		if len(codes) == 0 {
+			info[r] = &geoRuleInfo{skip: true}
+			continue
+		}
+		var elems []string
+		missing := false
+		for _, c := range codes {
+			cidrs := n.geoDB.CIDRsForCountry(c)
+			if len(cidrs) == 0 {
+				log.Printf("[geoip] WARN: 国家 %s 不在 GeoIP 库中，跳过规则: %s", c, r.String())
+				missing = true
+				break
+			}
+			elems = append(elems, cidrs...)
+		}
+		if missing {
+			info[r] = &geoRuleInfo{skip: true}
+			continue
+		}
+		setName := "geoip_" + strings.Join(codes, "_")
+		elems = dedupSorted(elems)
+		sets[setName] = elems
+		info[r] = &geoRuleInfo{setName: setName, negate: r.GeoIP.Mode == "deny"}
+	}
+	return sets, info
+}
+
+func sortedCountryCodes(g *rules.GeoIPSpec) []string {
+	if g == nil || len(g.Countries) == 0 {
+		return nil
+	}
+	codes := make([]string, 0, len(g.Countries))
+	for c := range g.Countries {
+		codes = append(codes, c)
+	}
+	sort.Strings(codes)
+	return codes
+}
+
+func dedupSorted(in []string) []string {
+	if len(in) == 0 {
+		return in
+	}
+	out := in[:1]
+	for _, s := range in[1:] {
+		if s != out[len(out)-1] {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // ruleIsIPv6 判断规则是否涉及 IPv6（基于 src/dst IP 匹配器）。
@@ -376,6 +495,26 @@ func (n *NftablesEnforcer) ruleToNft(r *rules.Rule, chain string) string {
 	if !r.DstIP.Matches(nil) && r.DstIP.String() != "any" {
 		matchers = append(matchers, fam+" daddr "+r.DstIP.String())
 	}
+
+	// GeoIP：下沉内核匹配（仅在 geoip 规则且已编译时）。
+	// 入站/转发看源国家（ip saddr），出站看目标国家（ip daddr）。
+	if n.geoInfo != nil {
+		if gi := n.geoInfo[r]; gi != nil {
+			if gi.skip {
+				return "" // 整条规则跳过（库里缺数据），交由告警日志提示
+			}
+			addr := "ip saddr"
+			if chain == "output" {
+				addr = "ip daddr"
+			}
+			if gi.negate {
+				matchers = append(matchers, addr+" != "+"@"+gi.setName)
+			} else {
+				matchers = append(matchers, addr+" "+"@"+gi.setName)
+			}
+		}
+	}
+
 	if r.State != "" {
 		matchers = append(matchers, "ct state "+r.State)
 	}
