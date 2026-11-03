@@ -634,6 +634,11 @@ func (g *GeoIPSpec) Matches(country string) bool {
 	return !inList
 }
 
+// Enabled 报告该规则是否真正启用了 geoip 匹配（供执行层判断）。
+func (g *GeoIPSpec) Enabled() bool {
+	return g != nil && g.enabled
+}
+
 func (g *GeoIPSpec) String() string {
 	if g == nil || !g.enabled {
 		return ""
