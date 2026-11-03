@@ -312,37 +312,33 @@ func Save(rs *rules.RuleSet, path string) error {
 		ToDstIP   string `yaml:"to_dst_ip,omitempty"`
 		ToDstPort uint16 `yaml:"to_dst_port,omitempty"`
 	}
-	type outRateLimit struct {
-		Rate   int  `yaml:"rate"`
-		Burst  int  `yaml:"burst,omitempty"`
-		PerSrc bool `yaml:"per_src,omitempty"`
-	}
 	type outRule struct {
-		Action       string        `yaml:"action"`
-		SrcIP        string        `yaml:"src_ip,omitempty"`
-		DstIP        string        `yaml:"dst_ip,omitempty"`
-		SrcMAC       string        `yaml:"src_mac,omitempty"`
-		DstMAC       string        `yaml:"dst_mac,omitempty"`
-		Protocol     string        `yaml:"protocol,omitempty"`
-		SrcPort      string        `yaml:"src_port,omitempty"`
-		DstPort      string        `yaml:"dst_port,omitempty"`
-		TCPFlags     string        `yaml:"tcp_flags,omitempty"`
-		TCPFlagsMask string        `yaml:"tcp_flags_mask,omitempty"`
-		Direction    string        `yaml:"direction,omitempty"`
-		State        string        `yaml:"state,omitempty"`
-		VLAN         int           `yaml:"vlan,omitempty"`
-		Time         string        `yaml:"time,omitempty"`
-		RateLimit    *outRateLimit `yaml:"rate_limit,omitempty"`
-		Bandwidth    float64       `yaml:"bandwidth,omitempty"`
-		BurstBytes   int64         `yaml:"burst_bytes,omitempty"`
-		ConnLimit    int           `yaml:"conn_limit,omitempty"`
-		PerSrc       bool          `yaml:"per_src,omitempty"`
-		GeoIP        string        `yaml:"geoip,omitempty"`
-		AppProto     string        `yaml:"app_proto,omitempty"`
-		IPGroup      string        `yaml:"ip_group,omitempty"`
-		NAT          *outNAT       `yaml:"nat,omitempty"`
-		Comment      string        `yaml:"comment,omitempty"`
-		Name         string        `yaml:"name,omitempty"`
+		Action       string   `yaml:"action"`
+		SrcIP        string   `yaml:"src_ip,omitempty"`
+		DstIP        string   `yaml:"dst_ip,omitempty"`
+		SrcMAC       string   `yaml:"src_mac,omitempty"`
+		DstMAC       string   `yaml:"dst_mac,omitempty"`
+		Protocol     string   `yaml:"protocol,omitempty"`
+		SrcPort      string   `yaml:"src_port,omitempty"`
+		DstPort      string   `yaml:"dst_port,omitempty"`
+		TCPFlags     string   `yaml:"tcp_flags,omitempty"`
+		TCPFlagsMask string   `yaml:"tcp_flags_mask,omitempty"`
+		Direction    string   `yaml:"direction,omitempty"`
+		State        string   `yaml:"state,omitempty"`
+		VLAN         int      `yaml:"vlan,omitempty"`
+		Time         string   `yaml:"time,omitempty"`
+		RateLimit    int      `yaml:"rate_limit,omitempty"`
+		Burst        int      `yaml:"burst,omitempty"`
+		Bandwidth    float64  `yaml:"bandwidth,omitempty"`
+		BurstBytes   int64    `yaml:"burst_bytes,omitempty"`
+		ConnLimit    int      `yaml:"conn_limit,omitempty"`
+		PerSrc       bool     `yaml:"per_src,omitempty"`
+		GeoIP        string   `yaml:"geoip,omitempty"`
+		AppProto     string   `yaml:"app_proto,omitempty"`
+		IPGroup      string   `yaml:"ip_group,omitempty"`
+		NAT          *outNAT  `yaml:"nat,omitempty"`
+		Comment      string   `yaml:"comment,omitempty"`
+		Name         string   `yaml:"name,omitempty"`
 	}
 	out := struct {
 		Default  string            `yaml:"default"`
@@ -400,17 +396,19 @@ func Save(rs *rules.RuleSet, path string) error {
 			or.Time = r.Time.String()
 		}
 		if r.RateLimit != nil && r.RateLimit.Rate > 0 {
-			or.RateLimit = &outRateLimit{Rate: r.RateLimit.Rate, Burst: r.RateLimit.Burst, PerSrc: r.RateLimit.PerSrc}
+			or.RateLimit = r.RateLimit.Rate
+			or.Burst = r.RateLimit.Burst
+			or.PerSrc = r.RateLimit.PerSrc
 		}
 		if r.Bandwidth != nil && r.Bandwidth.BytesPerSec > 0 {
 			mbps := float64(r.Bandwidth.BytesPerSec) * 8 / 1024 / 1024
 			or.Bandwidth = mbps
 			or.BurstBytes = r.Bandwidth.Burst
-			or.PerSrc = r.Bandwidth.PerSrc
+			or.PerSrc = or.PerSrc || r.Bandwidth.PerSrc
 		}
 		if r.ConnLimit != nil && r.ConnLimit.Max > 0 {
 			or.ConnLimit = r.ConnLimit.Max
-			or.PerSrc = r.ConnLimit.PerSrc
+			or.PerSrc = or.PerSrc || r.ConnLimit.PerSrc
 		}
 		if r.GeoIP != nil {
 			or.GeoIP = r.GeoIP.String()

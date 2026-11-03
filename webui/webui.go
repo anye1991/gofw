@@ -2,19 +2,28 @@
 package webui
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"gofw/config"
 	"gofw/engine"
 	"gofw/rules"
 )
+
+//go:embed index.html
+var dashboardHTML string
+
+const sessionTTL = 24 * time.Hour
 
 // Server Web 管理服务器。
 type Server struct {
@@ -24,23 +33,42 @@ type Server struct {
 	rulesFile string               // 规则文件路径，用于持久化
 	apply     func(*rules.RuleSet) // 应用新规则集的回调（热替换 + nftables）
 	mu        sync.Mutex           // 写操作互斥锁，防止并发修改导致丢失更新
+
+	password string             // 非空时启用登录鉴权（来自环境变量 GOFW_WEB_PASSWORD）
+	sessions map[string]int64   // sid -> 过期时间戳
+	sessMu   sync.Mutex
 }
 
 // New 创建 Web 管理服务器。
 // apply 回调负责将新规则集热替换到引擎并下发 nftables。
 func New(engPtr *atomic.Pointer[engine.Engine], rsPtr *atomic.Pointer[rules.RuleSet], addr, rulesFile string, apply func(*rules.RuleSet)) *Server {
-	return &Server{engPtr: engPtr, rsPtr: rsPtr, addr: addr, rulesFile: rulesFile, apply: apply}
+	s := &Server{
+		engPtr:    engPtr,
+		rsPtr:     rsPtr,
+		addr:      addr,
+		rulesFile: rulesFile,
+		apply:     apply,
+		password:  strings.TrimSpace(os.Getenv("GOFW_WEB_PASSWORD")),
+	}
+	if s.password != "" {
+		s.sessions = make(map[string]int64)
+	}
+	return s
 }
 
 // Start 启动 HTTP 服务器。
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.handleDashboard)
-	mux.HandleFunc("/api/stats", s.handleStats)
-	mux.HandleFunc("/api/rules", s.handleRules)
-	mux.HandleFunc("/api/rules/", s.handleRules) // 处理 /api/rules/{index} 子路径
-	mux.HandleFunc("/api/conns", s.handleConns)
-	mux.HandleFunc("/api/reload", s.handleReload)
+	mux.HandleFunc("/api/login", s.handleLogin)
+	mux.HandleFunc("/api/logout", s.handleLogout)
+	mux.HandleFunc("/api/events", s.auth(s.handleEvents))
+	mux.HandleFunc("/api/stats", s.auth(s.handleStats))
+	mux.HandleFunc("/api/rules", s.auth(s.handleRules))
+	mux.HandleFunc("/api/rules/", s.auth(s.handleRules)) // 处理 /api/rules/{index} 子路径
+	mux.HandleFunc("/api/conns", s.auth(s.handleConns))
+	mux.HandleFunc("/api/config", s.auth(s.handleConfig))
+	mux.HandleFunc("/api/reload", s.auth(s.handleReload))
+	mux.HandleFunc("/", s.auth(s.handleIndex))
 
 	srv := &http.Server{
 		Addr:    s.addr,
@@ -49,10 +77,86 @@ func (s *Server) Start() error {
 	return srv.ListenAndServe()
 }
 
-func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	rs := s.rsPtr.Load()
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, dashboardHTML, rs.Len(), rs.DefaultAction)
+	io.WriteString(w, dashboardHTML)
+}
+
+// auth 中间件：未设置密码时放行；设置密码时，仅对 /api/* 校验会话 cookie，
+// 登录接口本身匿名可达，页面（含登录框）始终返回以便前端引导登录。
+func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
+	if s.password == "" {
+		return next
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/login" || !strings.HasPrefix(r.URL.Path, "/api/") {
+			next(w, r)
+			return
+		}
+		c, err := r.Cookie("gofw_sid")
+		if err != nil || !s.validSession(c.Value) {
+			writeError(w, http.StatusUnauthorized, "not authenticated")
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) validSession(sid string) bool {
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
+	exp, ok := s.sessions[sid]
+	if !ok || exp < time.Now().Unix() {
+		delete(s.sessions, sid)
+		return false
+	}
+	return true
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if s.password == "" {
+		writeJSON(w, map[string]interface{}{"ok": true, "auth": false, "note": "no password configured"})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var body struct {
+		Password string `json:"password"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if subtle.ConstantTimeCompare([]byte(body.Password), []byte(s.password)) != 1 {
+		writeError(w, http.StatusUnauthorized, "invalid password")
+		return
+	}
+	sid := randHex(32)
+	s.sessMu.Lock()
+	s.sessions[sid] = time.Now().Add(sessionTTL).Unix()
+	s.sessMu.Unlock()
+	http.SetCookie(w, &http.Cookie{
+		Name:     "gofw_sid",
+		Value:    sid,
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   int(sessionTTL.Seconds()),
+		SameSite: http.SameSiteLaxMode,
+	})
+	writeJSON(w, map[string]interface{}{"ok": true})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie("gofw_sid"); err == nil {
+		s.sessMu.Lock()
+		delete(s.sessions, c.Value)
+		s.sessMu.Unlock()
+	}
+	http.SetCookie(w, &http.Cookie{Name: "gofw_sid", Value: "", Path: "/", MaxAge: -1})
+	writeJSON(w, map[string]interface{}{"ok": true})
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +166,14 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		"rules":  eng.RuleStats(),
 	}
 	writeJSON(w, out)
+}
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	eng := s.engPtr.Load()
+	writeJSON(w, map[string]interface{}{
+		"events": eng.Recent(),
+		"count":  len(eng.Recent()),
+	})
 }
 
 func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
@@ -192,6 +304,44 @@ func (s *Server) handleRuleDelete(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleConfig GET 返回原始规则文件；PUT 解析并持久化 + 热应用。
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		if s.rulesFile == "" {
+			writeError(w, http.StatusNotFound, "no rules file")
+			return
+		}
+		data, err := os.ReadFile(s.rulesFile)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write(data)
+	case http.MethodPut:
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "read body: "+err.Error())
+			return
+		}
+		newRS, err := config.LoadFromData(body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "parse error: "+err.Error())
+			return
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if err := s.commit(newRS); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]interface{}{"status": "saved", "rules": newRS.Len()})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
 // cloneRuleset 深拷贝当前规则集（保留默认动作和地址簿）。
 func (s *Server) cloneRuleset() *rules.RuleSet {
 	rs := s.rsPtr.Load()
@@ -227,11 +377,25 @@ func parseIndex(path string) (int, bool) {
 	if len(parts) != 3 || parts[0] != "api" || parts[1] != "rules" {
 		return 0, false
 	}
-	idx, err := strconv.Atoi(parts[2])
+	idx, err := atoiSafe(parts[2])
 	if err != nil {
 		return 0, false
 	}
 	return idx, true
+}
+
+func atoiSafe(s string) (int, error) {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, fmt.Errorf("invalid")
+		}
+		n = n*10 + int(c-'0')
+	}
+	if s == "" {
+		return 0, fmt.Errorf("empty")
+	}
+	return n, nil
 }
 
 func writeError(w http.ResponseWriter, code int, msg string) {
@@ -258,21 +422,16 @@ func writeJSON(w http.ResponseWriter, v interface{}) {
 	json.NewEncoder(w).Encode(v)
 }
 
-var dashboardHTML = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>gofw Dashboard</title>
-<style>
-body{font-family:monospace;background:#1a1a2e;color:#e0e0e0;margin:20px}
-h1{color:#0f3460;border-bottom:2px solid #16213e;padding-bottom:10px}
-.card{background:#16213e;padding:15px;margin:10px 0;border-radius:8px}
-.stat{font-size:24px;color:#e94560;font-weight:bold}
-table{width:100%%;border-collapse:collapse;margin-top:10px}
-th,td{padding:8px;text-align:left;border-bottom:1px solid #0f3460}
-th{background:#0f3460}
-</style></head><body>
-<h1>gofw 防火墙管理面板</h1>
-<div class="card"><b>规则数:</b> <span class="stat">%d</span> &nbsp; <b>默认动作:</b> <span class="stat">%s</span></div>
-<div class="card"><b>实时统计 API:</b> <a href="/api/stats" style="color:#e94560">/api/stats</a> | 
-<a href="/api/rules" style="color:#e94560">/api/rules</a> | 
-<a href="/api/conns" style="color:#e94560">/api/conns</a></div>
-<script>setTimeout(function(){location.reload()},5000)</script>
-</body></html>`
+func randHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "fallback"
+	}
+	const hexc = "0123456789abcdef"
+	out := make([]byte, n*2)
+	for i, x := range b {
+		out[i*2] = hexc[x>>4]
+		out[i*2+1] = hexc[x&0x0f]
+	}
+	return string(out)
+}
