@@ -70,6 +70,8 @@ chmod +x deploy.sh
 5. **nginx 443**：`nginx-gofw.conf` 已同时 `listen 80` 与 `listen 443 ssl`（自签证书，
    CN / SAN = `gofw.<域名>`）。EdgeOne 回源到 `:80` 即出面板；若后续 DNS 直连源站（绕过 EdgeOne），
    走 `:443` 会提示自签证书、手动信任即可。
+6. **可选告警**：如需拦截 / 异常告警，准备 `alert.yaml`（Webhook 或 SMTP 邮件，字段见主文档「告警通知」），
+   在 `start-gofw.sh` 的启动命令追加 `--alert /opt/gofw/alert.yaml`，再 `systemctl restart gofw` 即可生效。
 
 ---
 
