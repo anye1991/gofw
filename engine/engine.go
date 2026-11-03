@@ -417,6 +417,44 @@ func (d *Decision) Allowed() bool {
 	return d.Action == rules.ActionAccept || d.Action == rules.ActionLog
 }
 
+// Event 是单条决策记录，供 Web UI 实时拦截流展示。
+type Event struct {
+	TS          int64  `json:"ts"`
+	Action      string `json:"action"`
+	SrcIP       string `json:"src_ip"`
+	SrcPort     uint16 `json:"src_port"`
+	DstIP       string `json:"dst_ip"`
+	DstPort     uint16 `json:"dst_port"`
+	Proto       uint8  `json:"proto"`
+	Country     string `json:"country"`
+	RuleComment string `json:"rule"`
+	RuleIndex   int    `json:"rule_index"`
+}
+
+// eventRing 是一个有界环形缓冲，保存最近若干条决策。
+type eventRing struct {
+	mu  sync.Mutex
+	buf []Event
+	cap int
+}
+
+func (r *eventRing) push(e Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.buf = append(r.buf, e)
+	if len(r.buf) > r.cap {
+		r.buf = r.buf[len(r.buf)-r.cap:]
+	}
+}
+
+func (r *eventRing) snapshot() []Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Event, len(r.buf))
+	copy(out, r.buf)
+	return out
+}
+
 type Engine struct {
 	Ruleset   *rules.RuleSet
 	Conntrack *ConnectionTracker
@@ -427,15 +465,70 @@ type Engine struct {
 	accepted  uint64
 	dropped   uint64
 	bytes     uint64
+
+	eventCh chan Event
+	events  *eventRing
 }
 
 func NewEngine(rs *rules.RuleSet) *Engine {
-	return &Engine{
+	e := &Engine{
 		Ruleset:   rs,
 		Conntrack: &ConnectionTracker{},
 		Frag:      &FragReassembler{},
 		GeoIP:     geoip.New(),
 		DPI:       dpi.NewDetector(),
+		eventCh:   make(chan Event, 1024),
+		events:    &eventRing{cap: 500},
+	}
+	go e.collectEvents()
+	return e
+}
+
+// collectEvents 将异步决策事件写入有界环形缓冲，避免阻塞 Decide 热路径。
+func (e *Engine) collectEvents() {
+	for ev := range e.eventCh {
+		e.events.push(ev)
+	}
+}
+
+// Recent 返回最近若干条决策记录（按时间升序）。
+func (e *Engine) Recent() []Event {
+	evs := e.events.snapshot()
+	out := make([]Event, len(evs))
+	for i, v := range evs {
+		out[i] = v
+	}
+	return out
+}
+
+// publish 非阻塞地记录一条决策事件。
+func (e *Engine) publish(action string, rule *rules.Rule, p *packet.Packet, country string) {
+	idx := -1
+	if rule != nil {
+		for i, r := range e.Ruleset.Rules {
+			if r == rule {
+				idx = i
+				break
+			}
+		}
+	}
+	ev := Event{
+		TS:          time.Now().Unix(),
+		Action:      action,
+		SrcIP:       p.SrcIP.String(),
+		SrcPort:     p.SrcPort,
+		DstIP:       p.DstIP.String(),
+		DstPort:     p.DstPort,
+		Proto:       p.Proto,
+		Country:     country,
+		RuleIndex:   idx,
+	}
+	if rule != nil {
+		ev.RuleComment = rule.Comment
+	}
+	select {
+	case e.eventCh <- ev:
+	default:
 	}
 }
 
@@ -501,6 +594,8 @@ func (e *Engine) Decide(p *packet.Packet) Decision {
 	} else {
 		atomic.AddUint64(&e.dropped, 1)
 	}
+
+	e.publish(action, rule, p, srcCountry)
 
 	return Decision{Action: action, Rule: rule, ConnState: connState, Packet: p}
 }

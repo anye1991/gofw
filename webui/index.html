@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gofw 防火墙管理后台</title>
+<style>
+:root{
+  --bg:#0b1020; --panel:#121a2e; --panel2:#16213e; --line:#22304d;
+  --txt:#e6edf7; --muted:#8aa0c2; --dim:#5d6e8c;
+  --accent:#38bdf8; --green:#34d399; --red:#f87171; --amber:#fbbf24; --violet:#a78bfa;
+  --radius:14px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg);color:var(--txt);font-size:14px;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+button{font-family:inherit;cursor:pointer}
+/* layout */
+#app{display:flex;min-height:100vh}
+.sidebar{width:212px;background:linear-gradient(180deg,#0d1426,#0b1020);border-right:1px solid var(--line);
+  padding:20px 14px;display:flex;flex-direction:column;gap:6px;position:sticky;top:0;height:100vh}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px 18px}
+.brand .logo{width:30px;height:30px;border-radius:8px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#04121f;font-weight:800;font-size:15px}
+.brand b{font-size:15px;letter-spacing:.5px}
+.nav-btn{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid transparent;
+  background:transparent;color:var(--muted);font-size:13.5px;text-align:left;width:100%;transition:.15s}
+.nav-btn:hover{background:var(--panel);color:var(--txt)}
+.nav-btn.active{background:var(--panel2);color:var(--txt);border-color:var(--line)}
+.nav-btn .ic{width:18px;text-align:center;opacity:.9}
+.side-foot{margin-top:auto;font-size:11px;color:var(--dim);padding:8px}
+.main{flex:1;padding:0;min-width:0}
+.topbar{display:flex;align-items:center;gap:14px;padding:16px 26px;border-bottom:1px solid var(--line);
+  background:rgba(11,16,32,.7);position:sticky;top:0;z-index:5}
+.topbar h1{font-size:16px;margin:0;font-weight:600}
+.pill{font-size:12px;padding:4px 11px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.pill b{color:var(--txt)}
+.spacer{flex:1}
+.user{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted)}
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--txt);padding:8px 14px;border-radius:9px;font-size:13px;transition:.15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.danger{border-color:#5b2a2a;color:var(--red)}
+.btn.danger:hover{background:#2a1414}
+.content{padding:24px 26px}
+.section{display:none;animation:fade .2s ease}
+.section.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+/* cards */
+.grid{display:grid;gap:14px}
+.cards{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+.stat .label{color:var(--muted);font-size:12px;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.stat .val{font-size:26px;font-weight:700;letter-spacing:.3px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+.panel h2{margin:0 0 4px;font-size:15px;font-weight:600}
+.panel .sub{color:var(--muted);font-size:12.5px;margin-bottom:14px}
+.chartbox{margin-top:8px}
+svg.chart{width:100%;height:170px;display:block}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:6px}
+.legend i{width:12px;height:3px;display:inline-block;border-radius:2px;margin-right:6px;vertical-align:middle}
+/* table */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:500;font-size:12px;background:var(--panel2)}
+tbody tr:hover{background:rgba(56,189,248,.05)}
+td.mono,code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+.badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:6px;letter-spacing:.4px}
+.b-accept{background:rgba(52,211,153,.14);color:var(--green)}
+.b-drop{background:rgba(248,113,113,.14);color:var(--red)}
+.b-reject{background:rgba(251,191,36,.14);color:var(--amber)}
+.b-log{background:rgba(167,139,250,.14);color:var(--violet)}
+.bar{height:5px;border-radius:3px;background:var(--line);overflow:hidden;min-width:60px}
+.bar > i{display:block;height:100%;background:var(--accent)}
+.row-actions{display:flex;gap:8px}
+.live-list{display:flex;flex-direction:column;gap:7px;max-height:62vh;overflow:auto}
+.ev{display:flex;align-items:center;gap:12px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);font-size:12.5px;animation:slidein .25s ease}
+@keyframes slidein{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+.ev .flow{font-family:ui-monospace,monospace;color:var(--txt);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev .meta{color:var(--muted);font-size:11.5px}
+.empty{color:var(--dim);text-align:center;padding:40px;font-size:13px}
+/* modal */
+.overlay{position:fixed;inset:0;background:rgba(4,8,18,.66);display:none;align-items:center;justify-content:center;z-index:20}
+.overlay.show{display:flex}
+.modal{width:440px;max-width:92vw;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px}
+.modal h3{margin:0 0 16px;font-size:16px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
+.field input,.field select,.field textarea{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--txt);
+  border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;outline:none}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--accent)}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:8px}
+textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;line-height:1.5;resize:vertical}
+/* login */
+#login{position:fixed;inset:0;background:radial-gradient(circle at 50% 30%,#10203a,#070b16);display:none;align-items:center;justify-content:center;z-index:50}
+#login.show{display:flex}
+.login-card{width:340px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:30px 26px;text-align:center}
+.login-card .logo{width:46px;height:46px;border-radius:12px;background:var(--accent);color:#04121f;font-weight:800;font-size:22px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
+.login-card h2{margin:0 0 4px;font-size:18px}
+.login-card p{color:var(--muted);font-size:12.5px;margin:0 0 20px}
+.login-card input{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:11px 13px;font-size:14px;margin-bottom:14px;outline:none}
+.login-card input:focus{border-color:var(--accent)}
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);
+  color:var(--txt);padding:10px 18px;border-radius:10px;font-size:13px;z-index:60;opacity:0;transition:.25s;pointer-events:none}
+.toast.show{opacity:1}
+.hint{font-size:11.5px;color:var(--dim);margin-top:6px}
+</style>
+</head>
+<body>
+
+<!-- 登录 -->
+<div id="login">
+  <div class="login-card">
+    <div class="logo">g</div>
+    <h2>gofw 管理后台</h2>
+    <p>请输入访问密码以登录控制台</p>
+    <input id="pw" type="password" placeholder="password" autocomplete="current-password">
+    <button class="btn primary" style="width:100%" onclick="doLogin()">登 录</button>
+    <div class="hint" id="login-hint"></div>
+  </div>
+</div>
+
+<div id="app">
+  <aside class="sidebar">
+    <div class="brand"><div class="logo">g</div><b>gofw</b></div>
+    <button class="nav-btn active" data-sec="overview"><span class="ic">▣</span> 概览</button>
+    <button class="nav-btn" data-sec="rules"><span class="ic">⚖</span> 规则管理</button>
+    <button class="nav-btn" data-sec="live"><span class="ic">⚡</span> 实时拦截</button>
+    <button class="nav-btn" data-sec="conns"><span class="ic">⇄</span> 连接跟踪</button>
+    <button class="nav-btn" data-sec="config"><span class="ic">{}</span> 配置源</button>
+    <div class="side-foot">gofw firewall · v1</div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <h1 id="page-title">概览</h1>
+      <span class="pill">默认动作 <b id="t-default">—</b></span>
+      <span class="pill">规则 <b id="t-rules">—</b></span>
+      <div class="spacer"></div>
+      <div class="user"><span id="u-name">admin</span>
+        <button class="btn" onclick="doLogout()">退出</button></div>
+    </div>
+
+    <div class="content">
+      <!-- 概览 -->
+      <section class="section active" id="sec-overview">
+        <div class="grid cards" style="margin-bottom:14px">
+          <div class="card stat"><div class="label"><span class="dot" style="background:var(--accent)"></span>总包量</div><div class="val" id="s-packets">0</div></div>
+          <div class="card stat"><div class="label"><span class="dot" style="background:var(--green)"></span>已放行</div><div class="val" id="s-accept">0</div></div>
+          <div class="card stat"><div class="label"><span class="dot" style="background:var(--red)"></span>已拦截</div><div class="val" id="s-drop">0</div></div>
+          <div class="card stat"><div class="label"><span class="dot" style="background:var(--amber)"></span>流量</div><div class="val" id="s-bytes">0</div></div>
+          <div class="card stat"><div class="label"><span class="dot" style="background:var(--violet)"></span>活跃连接</div><div class="val" id="s-conns">0</div></div>
+        </div>
+        <div class="panel">
+          <h2>实时吞吐</h2>
+          <div class="sub">每秒包量（青）与每秒拦截（红），最近 60 个采样点</div>
+          <div class="chartbox"><svg class="chart" id="chart" viewBox="0 0 600 170" preserveAspectRatio="none"></svg></div>
+          <div class="legend"><span><i style="background:var(--accent)"></i>包/秒</span><span><i style="background:var(--red)"></i>拦截/秒</span></div>
+        </div>
+      </section>
+
+      <!-- 规则 -->
+      <section class="section" id="sec-rules">
+        <div class="panel">
+          <h2>规则集 <span id="r-count" style="color:var(--muted);font-size:13px;font-weight:400"></span></h2>
+          <div class="sub">管理防火墙规则。命中数为实时统计，可增删改或编辑原始 YAML。</div>
+          <div style="margin-bottom:14px">
+            <button class="btn primary" onclick="openAdd()">+ 新增规则</button>
+            <button class="btn" onclick="toggleYAML()">编辑原始 YAML</button>
+            <button class="btn" onclick="loadRules()">刷新</button>
+          </div>
+          <div id="rules-table"></div>
+          <div id="yaml-box" style="display:none;margin-top:6px">
+            <textarea class="yaml" id="yaml-text"></textarea>
+            <div style="margin-top:10px;display:flex;gap:10px;justify-content:flex-end">
+              <button class="btn" onclick="toggleYAML()">取消</button>
+              <button class="btn primary" onclick="saveYAML()">保存并热应用</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 实时 -->
+      <section class="section" id="sec-live">
+        <div class="panel">
+          <h2>实时拦截流</h2>
+          <div class="sub">引擎最新决策记录（最新在顶部），每秒刷新。绿色放行、红色拦截、黄色拒绝。</div>
+          <div class="live-list" id="live-list"><div class="empty">暂无事件</div></div>
+        </div>
+      </section>
+
+      <!-- 连接 -->
+      <section class="section" id="sec-conns">
+        <div class="panel">
+          <h2>连接跟踪 <span id="c-count" style="color:var(--muted);font-size:13px;font-weight:400"></span></h2>
+          <div class="sub">当前被追踪的连接（按字节数排序）。</div>
+          <div id="conns-table"></div>
+        </div>
+      </section>
+
+      <!-- 配置 -->
+      <section class="section" id="sec-config">
+        <div class="panel">
+          <h2>配置源</h2>
+          <div class="sub">规则文件原始内容。修改后点击保存将校验并热应用到引擎。</div>
+          <textarea class="yaml" id="cfg-text" style="height:420px"></textarea>
+          <div style="margin-top:10px;display:flex;gap:10px;justify-content:flex-end">
+            <button class="btn" onclick="loadConfig()">重新加载</button>
+            <button class="btn primary" onclick="saveConfig()">保存</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="modal"><div class="modal" id="modal-body"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = (m,u,b)=>fetch(u,{method:m,headers:b?{'Content-Type':'application/json'}:{},body:b?JSON.stringify(b):undefined,credentials:'same-origin'}).then(r=>{
+  if(r.status===401){ location.reload(); throw new Error('unauth'); }
+  return r;
+});
+const jget = u => api('GET',u).then(r=>r.json());
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
+function fmt(n){n=Number(n)||0;if(n>=1e9)return(n/1e9).toFixed(2)+'G';if(n>=1e6)return(n/1e6).toFixed(2)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'K';return ''+n;}
+function protoName(p){return ({1:'ICMP',6:'TCP',17:'UDP',58:'ICMPv6'})[p]||('P'+p);}
+function badge(a){const m={ACCEPT:'b-accept',DROP:'b-drop',REJECT:'b-reject',LOG:'b-log'};return `<span class="badge ${m[a]||'b-log'}">${a}</span>`;}
+
+/* ---- 鉴权 ---- */
+async function checkAuth(){
+  try{ const r=await fetch('/api/stats',{credentials:'same-origin'});
+    if(r.ok){ boot(); return; }
+    if(r.status===401){ $('#login').classList.add('show'); return; }
+    boot();
+  }catch(e){ boot(); }
+}
+async function doLogin(){
+  const pw=$('#pw').value;
+  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw}),credentials:'same-origin'});
+  if(r.ok){ $('#login').classList.remove('show'); boot(); }
+  else { const j=await r.json().catch(()=>({})); $('#login-hint').textContent=j.error||'密码错误'; }
+}
+async function doLogout(){ await fetch('/api/logout',{method:'POST',credentials:'same-origin'}); location.reload(); }
+$('#pw') && document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&$('#login').classList.contains('show')) doLogin(); });
+
+/* ---- 主循环 ---- */
+let last=null, seriesP=[], seriesD=[];
+function boot(){ setInterval(tick,2000); tick(); setInterval(liveTick,1000); liveTick(); setInterval(connTick,3000); connTick(); }
+async function tick(){
+  const d=await jget('/api/stats');
+  const e=d.engine;
+  $('#s-packets').textContent=fmt(e.packets);
+  $('#s-accept').textContent=fmt(e.accepted);
+  $('#s-drop').textContent=fmt(e.dropped);
+  $('#s-bytes').textContent=fmt(e.bytes);
+  const c=e.connections||{}; $('#s-conns').textContent=c.total||0;
+  $('#t-rules').textContent=e.rules;
+  if(last){
+    const dt=2;
+    seriesP.push(Math.max(0,Math.round((e.packets-last.packets)/dt)));
+    seriesD.push(Math.max(0,Math.round((e.dropped-last.dropped)/dt)));
+    if(seriesP.length>60){seriesP.shift();seriesD.shift();}
+    drawChart();
+  }
+  last=e;
+}
+function drawChart(){
+  const W=600,H=170,pad=6;
+  const maxV=Math.max(1,...seriesP,...seriesD);
+  const n=Math.max(seriesP.length,1);
+  const sx=i=> pad + (n<=1?0:i*(W-2*pad)/(n-1));
+  const sy=v=> H-pad - (v/maxV)*(H-2*pad);
+  const line=(arr,col)=>arr.map((v,i)=>`${i?'L':'M'}${sx(i).toFixed(1)},${sy(v).toFixed(1)}`).join(' ');
+  $('#chart').innerHTML=
+    `<path d="${line(seriesP)}" fill="none" stroke="var(--accent)" stroke-width="2"/>`+
+    `<path d="${line(seriesD)}" fill="none" stroke="var(--red)" stroke-width="2"/>`;
+}
+
+/* ---- 规则 ---- */
+async function loadRules(){
+  const d=await jget('/api/rules');
+  $('#t-default').textContent=d.default;
+  $('#t-rules').textContent=d.rules.length;
+  $('#r-count').textContent='· 共 '+d.rules.length+' 条';
+  const maxH=Math.max(1,...d.rules.map(r=>r.hits||0));
+  let rows=d.rules.map(r=>`<tr>
+    <td style="color:var(--muted)">${r.index}</td>
+    <td>${badge(r.action)}</td>
+    <td class="mono" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.detail)}</td>
+    <td><div style="display:flex;align-items:center;gap:8px"><div class="bar"><i style="width:${(100*(r.hits||0)/maxH).toFixed(0)}%"></i></div><span class="mono">${fmt(r.hits)}</span></div></td>
+    <td class="mono">${fmt(r.bytes)}</td>
+    <td class="row-actions"><button class="btn" onclick="openEdit(${r.index})">编辑</button><button class="btn danger" onclick="delRule(${r.index})">删除</button></td>
+  </tr>`).join('');
+  $('#rules-table').innerHTML=`<table><thead><tr><th>#</th><th>动作</th><th>匹配</th><th>命中</th><th>流量</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=6 class="empty">无规则</td></tr>'}</tbody></table>`;
+}
+function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+async function delRule(i){ if(!confirm('确认删除规则 #'+i+'？'))return; const r=await api('DELETE','/api/rules/'+i); if(r.ok){toast('已删除');loadRules();} else toast('删除失败'); }
+function openAdd(){ openForm(null); }
+function openEdit(i){ jget('/api/rules').then(d=>{ const r=d.rules[i]; openForm(r); }); }
+function openForm(r){
+  const v=k=>r&&r.detail? '':'';
+  $('#modal-body').innerHTML=`<h3>${r?'编辑规则 #'+r.index:'新增规则'}</h3>
+    <div class="field"><label>动作</label><select id="f-action"><option ${!r||r.action==='ACCEPT'?'selected':''}>ACCEPT</option><option ${r&&r.action==='DROP'?'selected':''}>DROP</option><option ${r&&r.action==='REJECT'?'selected':''}>REJECT</option><option ${r&&r.action==='LOG'?'selected':''}>LOG</option></select></div>
+    <div class="field"><label>协议 (留空=any)</label><input id="f-proto" placeholder="tcp / udp / icmp"></div>
+    <div class="field"><label>源 IP (留空=any)</label><input id="f-sip" placeholder="203.0.113.0/24"></div>
+    <div class="field"><label>目的 IP (留空=any)</label><input id="f-dip" placeholder="10.0.0.0/8"></div>
+    <div class="field"><label>目的端口 (留空=any)</label><input id="f-dport" placeholder="80,443"></div>
+    <div class="field"><label>方向</label><select id="f-dir"><option value="">any</option><option value="in">in</option><option value="out">out</option></select></div>
+    <div class="field"><label>注释</label><input id="f-comment" placeholder="备注"></div>
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="submitForm(${r?r.index:'null'})">保存</button></div>`;
+  if(r){ const m=(r.detail||'').match(/(\w+)\s+([^ ]*):?(\S*)\s*->\s*([^ ]*):?(\S*)/); if(m){ $('#f-proto').value=m[1]&&m[1]!=='any'?m[1]:''; $('#f-dport').value=(m[5]&&m[5]!=='any')?m[5]:''; } $('#f-comment').value=r.comment||''; }
+  $('#modal').classList.add('show');
+}
+async function submitForm(idx){
+  const body={action:$('#f-action').value};
+  const grab=(id,v)=>{const x=$(id).value.trim(); if(x)body[v]=x;};
+  grab('#f-proto','protocol'); grab('#f-sip','src_ip'); grab('#f-dip','dst_ip'); grab('#f-dport','dst_port'); grab('#f-dir','direction'); grab('#f-comment','comment');
+  const url=idx==null?'/api/rules':'/api/rules/'+idx;
+  const r=await api(idx==null?'POST':'PUT',url,body);
+  if(r.ok){ closeModal(); toast('已保存'); loadRules(); } else { const j=await r.json().catch(()=>({})); toast(j.error||'保存失败'); }
+}
+function closeModal(){ $('#modal').classList.remove('show'); }
+let yamlMode=false;
+function toggleYAML(){ yamlMode=!yamlMode; $('#yaml-box').style.display=yamlMode?'block':'none'; if(yamlMode) loadConfig(); }
+async function loadConfig(){ const t=await api('GET','/api/config'); $('#cfg-text').value=await t.text(); if(yamlMode)$('#yaml-text').value=$('#cfg-text').value; }
+async function saveYAML(){ const rr=await fetch('/api/config',{method:'PUT',headers:{'Content-Type':'text/plain'},body:$('#yaml-text').value,credentials:'same-origin'}); if(rr.ok){toast('已保存并热应用');loadRules();} else toast('保存失败'); }
+async function saveConfig(){ const rr=await fetch('/api/config',{method:'PUT',headers:{'Content-Type':'text/plain'},body:$('#cfg-text').value,credentials:'same-origin'}); if(rr.ok){toast('已保存');} else toast('保存失败'); }
+
+/* ---- 实时拦截流 ---- */
+async function liveTick(){
+  const d=await jget('/api/events');
+  const evs=(d.events||[]).slice(-60).reverse();
+  if(!evs.length){ $('#live-list').innerHTML='<div class="empty">暂无事件</div>'; return; }
+  $('#live-list').innerHTML=evs.map(e=>{
+    const t=new Date((e.ts||0)*1000).toLocaleTimeString();
+    return `<div class="ev">${badge(e.action)}<div class="flow">${esc(e.src_ip)}:${e.src_port||'?'} → ${esc(e.dst_ip)}:${e.dst_port||'?'}</div><div class="meta">${protoName(e.proto)} · ${esc(e.country||'')} · ${esc(e.rule||'默认')} · ${t}</div></div>`;
+  }).join('');
+}
+
+/* ---- 连接 ---- */
+async function connTick(){
+  const d=await jget('/api/conns');
+  $('#c-count').textContent='· 共 '+ (d.total||0) +' 条';
+  let rows=(d.connections||[]).map(c=>`<tr><td class="mono">${esc(c.Src)}</td><td class="mono">${esc(c.Dst)}</td><td>${protoName(c.Proto)}</td><td>${esc(c.State)}</td><td class="mono">${fmt(c.Packets)}</td><td class="mono">${fmt(c.Bytes)}</td></tr>`).join('');
+  $('#conns-table').innerHTML=`<table><thead><tr><th>源</th><th>目的</th><th>协议</th><th>状态</th><th>包</th><th>字节</th></tr></thead><tbody>${rows||'<tr><td colspan=6 class="empty">无连接</td></tr>'}</tbody></table>`;
+}
+
+/* ---- 导航 ---- */
+const titles={overview:'概览',rules:'规则管理',live:'实时拦截',conns:'连接跟踪',config:'配置源'};
+document.querySelectorAll('.nav-btn').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  const s=b.dataset.sec;
+  document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
+  $('#sec-'+s).classList.add('active');
+  $('#page-title').textContent=titles[s];
+  if(s==='rules')loadRules(); if(s==='config')loadConfig();
+});
+checkAuth();
+</script>
+</body>
+</html>
