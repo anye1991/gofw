@@ -44,6 +44,7 @@ button{font-family:inherit;cursor:pointer}
 .btn.primary:hover{filter:brightness(1.08)}
 .btn.danger{border-color:#5b2a2a;color:var(--red)}
 .btn.danger:hover{background:#2a1414}
+.btn.sm{padding:5px 10px;font-size:12px}
 .content{padding:24px 26px}
 .section{display:none;animation:fade .2s ease}
 .section.active{display:block}
@@ -82,18 +83,44 @@ td.mono,code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fo
 .ev .flow{font-family:ui-monospace,monospace;color:var(--txt);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ev .meta{color:var(--muted);font-size:11.5px}
 .empty{color:var(--dim);text-align:center;padding:40px;font-size:13px}
+/* tags */
+.taglist{display:flex;flex-wrap:wrap;gap:5px}
+.tag{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:5px;background:rgba(167,139,250,.12);color:var(--violet);border:1px solid rgba(167,139,250,.25)}
+.tag.g{background:rgba(52,211,153,.12);color:var(--green);border-color:rgba(52,211,153,.25)}
+.tag.r{background:rgba(248,113,113,.12);color:var(--red);border-color:rgba(248,113,113,.25)}
+.tag.b{background:rgba(56,189,248,.12);color:var(--accent);border-color:rgba(56,189,248,.25)}
 /* modal */
 .overlay{position:fixed;inset:0;background:rgba(4,8,18,.66);display:none;align-items:center;justify-content:center;z-index:20}
 .overlay.show{display:flex}
-.modal{width:440px;max-width:92vw;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px}
-.modal h3{margin:0 0 16px;font-size:16px}
-.field{margin-bottom:12px}
+.modal{width:580px;max-width:94vw;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px}
+.modal h3{margin:0 0 14px;font-size:16px}
+.field{margin-bottom:11px}
 .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
 .field input,.field select,.field textarea{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--txt);
   border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;outline:none}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--accent)}
+.form-scroll{max-height:62vh;overflow:auto;padding:2px 6px 2px 2px;margin-bottom:6px}
+fieldset{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 14px}
+fieldset legend{font-size:12px;color:var(--accent);padding:0 6px;font-weight:600}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.checks{display:flex;flex-wrap:wrap;gap:12px;margin-top:2px}
+.checks label{display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--muted);cursor:pointer}
+.checks input{width:auto}
 .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:8px}
 textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;line-height:1.5;resize:vertical}
+/* capability grid */
+.cap-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.cap{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+.cap h3{margin:0 0 4px;font-size:14px;display:flex;align-items:center;gap:8px}
+.cap .desc{color:var(--muted);font-size:12px;margin-bottom:10px;min-height:32px}
+.status{font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px}
+.status.on{background:rgba(52,211,153,.14);color:var(--green)}
+.status.off{background:rgba(248,113,113,.14);color:var(--red)}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.chip{font-size:11px;padding:2px 8px;border-radius:5px;background:var(--bg);border:1px solid var(--line);color:var(--muted)}
+.kv{display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0;border-bottom:1px dashed var(--line)}
+.kv:last-child{border-bottom:none}
+.kv span:first-child{color:var(--muted)}
 /* login */
 #login{position:fixed;inset:0;background:radial-gradient(circle at 50% 30%,#10203a,#070b16);display:none;align-items:center;justify-content:center;z-index:50}
 #login.show{display:flex}
@@ -128,8 +155,10 @@ textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;l
     <div class="brand"><div class="logo">g</div><b>gofw</b></div>
     <button class="nav-btn active" data-sec="overview"><span class="ic">▣</span> 概览</button>
     <button class="nav-btn" data-sec="rules"><span class="ic">⚖</span> 规则管理</button>
+    <button class="nav-btn" data-sec="ipgroups"><span class="ic">▤</span> 地址簿</button>
     <button class="nav-btn" data-sec="live"><span class="ic">⚡</span> 实时拦截</button>
     <button class="nav-btn" data-sec="conns"><span class="ic">⇄</span> 连接跟踪</button>
+    <button class="nav-btn" data-sec="system"><span class="ic">◈</span> 能力中心</button>
     <button class="nav-btn" data-sec="config"><span class="ic">{}</span> 配置源</button>
     <div class="side-foot">gofw firewall · v1</div>
   </aside>
@@ -166,7 +195,7 @@ textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;l
       <section class="section" id="sec-rules">
         <div class="panel">
           <h2>规则集 <span id="r-count" style="color:var(--muted);font-size:13px;font-weight:400"></span></h2>
-          <div class="sub">管理防火墙规则。命中数为实时统计，可增删改或编辑原始 YAML。</div>
+          <div class="sub">管理防火墙规则，覆盖引擎全部匹配能力（五元组 / MAC / VLAN / TCP标志 / 状态 / 时段 / 限速 / GeoIP / DPI / 地址簿 / NAT）。命中数为实时统计。</div>
           <div style="margin-bottom:14px">
             <button class="btn primary" onclick="openAdd()">+ 新增规则</button>
             <button class="btn" onclick="toggleYAML()">编辑原始 YAML</button>
@@ -180,6 +209,20 @@ textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;l
               <button class="btn primary" onclick="saveYAML()">保存并热应用</button>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- 地址簿 -->
+      <section class="section" id="sec-ipgroups">
+        <div class="panel">
+          <h2>IP 地址簿 <span id="ig-count" style="color:var(--muted);font-size:13px;font-weight:400"></span></h2>
+          <div class="sub">维护可重用的 IP / CIDR 分组，规则中通过「地址簿」字段引用，避免重复书写长地址列表。</div>
+          <div style="margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <div class="field" style="margin:0;flex:1;min-width:160px"><label>分组名</label><input id="ig-name" placeholder="web_servers"></div>
+            <div class="field" style="margin:0;flex:2;min-width:220px"><label>CIDR / IP（逗号分隔）</label><input id="ig-cidr" placeholder="10.0.0.10,10.0.0.11"></div>
+            <button class="btn primary" onclick="addIPGroup()">添加 / 更新</button>
+          </div>
+          <div id="ipgroups-table"></div>
         </div>
       </section>
 
@@ -198,6 +241,15 @@ textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;l
           <h2>连接跟踪 <span id="c-count" style="color:var(--muted);font-size:13px;font-weight:400"></span></h2>
           <div class="sub">当前被追踪的连接（按字节数排序）。</div>
           <div id="conns-table"></div>
+        </div>
+      </section>
+
+      <!-- 能力中心 -->
+      <section class="section" id="sec-system">
+        <div class="panel">
+          <h2>引擎能力中心</h2>
+          <div class="sub">gofw 防火墙引擎内置的模块能力总览。状态实时反映当前运行实例。</div>
+          <div class="cap-grid" id="cap-grid"></div>
         </div>
       </section>
 
@@ -231,6 +283,9 @@ function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');se
 function fmt(n){n=Number(n)||0;if(n>=1e9)return(n/1e9).toFixed(2)+'G';if(n>=1e6)return(n/1e6).toFixed(2)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'K';return ''+n;}
 function protoName(p){return ({1:'ICMP',6:'TCP',17:'UDP',58:'ICMPv6'})[p]||('P'+p);}
 function badge(a){const m={ACCEPT:'b-accept',DROP:'b-drop',REJECT:'b-reject',LOG:'b-log'};return `<span class="badge ${m[a]||'b-log'}">${a}</span>`;}
+function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+let RULES=[], IPGROUPS=[];
 
 /* ---- 鉴权 ---- */
 async function checkAuth(){
@@ -251,7 +306,7 @@ $('#pw') && document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&$('#log
 
 /* ---- 主循环 ---- */
 let last=null, seriesP=[], seriesD=[];
-function boot(){ setInterval(tick,2000); tick(); setInterval(liveTick,1000); liveTick(); setInterval(connTick,3000); connTick(); }
+function boot(){ setInterval(tick,2000); tick(); setInterval(liveTick,1000); liveTick(); setInterval(connTick,3000); connTick(); setInterval(sysTick,5000); sysTick(); }
 async function tick(){
   const d=await jget('/api/stats');
   const e=d.engine;
@@ -285,42 +340,178 @@ function drawChart(){
 /* ---- 规则 ---- */
 async function loadRules(){
   const d=await jget('/api/rules');
+  RULES=d.rules||[]; IPGROUPS=d.ip_groups||[];
   $('#t-default').textContent=d.default;
-  $('#t-rules').textContent=d.rules.length;
-  $('#r-count').textContent='· 共 '+d.rules.length+' 条';
-  const maxH=Math.max(1,...d.rules.map(r=>r.hits||0));
-  let rows=d.rules.map(r=>`<tr>
+  $('#t-rules').textContent=RULES.length;
+  $('#r-count').textContent='· 共 '+RULES.length+' 条';
+  const maxH=Math.max(1,...RULES.map(r=>r.hits||0));
+  let rows=RULES.map(r=>`<tr>
     <td style="color:var(--muted)">${r.index}</td>
     <td>${badge(r.action)}</td>
-    <td class="mono" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.detail)}</td>
+    <td class="mono" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.detail)}</td>
+    <td>${tagsHTML(r)}</td>
     <td><div style="display:flex;align-items:center;gap:8px"><div class="bar"><i style="width:${(100*(r.hits||0)/maxH).toFixed(0)}%"></i></div><span class="mono">${fmt(r.hits)}</span></div></td>
     <td class="mono">${fmt(r.bytes)}</td>
-    <td class="row-actions"><button class="btn" onclick="openEdit(${r.index})">编辑</button><button class="btn danger" onclick="delRule(${r.index})">删除</button></td>
+    <td class="row-actions"><button class="btn sm" onclick="openEdit(${r.index})">编辑</button><button class="btn sm danger" onclick="delRule(${r.index})">删除</button></td>
   </tr>`).join('');
-  $('#rules-table').innerHTML=`<table><thead><tr><th>#</th><th>动作</th><th>匹配</th><th>命中</th><th>流量</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=6 class="empty">无规则</td></tr>'}</tbody></table>`;
+  $('#rules-table').innerHTML=`<table><thead><tr><th>#</th><th>动作</th><th>匹配</th><th>高级能力</th><th>命中</th><th>流量</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=7 class="empty">无规则</td></tr>'}</tbody></table>`;
 }
-function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function tagsHTML(r){
+  const t=[];
+  if(r.geoip) t.push(['GEO','g']);
+  if(r.app_proto) t.push(['DPI:'+r.app_proto,'b']);
+  if(r.nat) t.push(['NAT','g']);
+  if(r.rate_limit||r.bandwidth||r.conn_limit) t.push(['限速','r']);
+  if(r.time) t.push(['时段','b']);
+  if(r.vlan) t.push(['VLAN','b']);
+  if(r.src_mac||r.dst_mac) t.push(['MAC','b']);
+  if(r.tcp_flags) t.push(['FLAGS','b']);
+  if(r.ip_group) t.push(['组:'+r.ip_group,'g']);
+  if(r.state) t.push(['state:'+r.state,'b']);
+  return '<div class="taglist">'+t.map(([x,c])=>`<span class="tag ${c}">${esc(x)}</span>`).join('')+(t.length?'':'<span class="tag">基础</span>')+'</div>';
+}
 async function delRule(i){ if(!confirm('确认删除规则 #'+i+'？'))return; const r=await api('DELETE','/api/rules/'+i); if(r.ok){toast('已删除');loadRules();} else toast('删除失败'); }
 function openAdd(){ openForm(null); }
-function openEdit(i){ jget('/api/rules').then(d=>{ const r=d.rules[i]; openForm(r); }); }
+function openEdit(i){ openForm(RULES[i]); }
+
+/* ---- TCP 标志 / 星期 复选框 ---- */
+function flagsGroup(prefix, sel){
+  const all=[['syn','SYN'],['ack','ACK'],['fin','FIN'],['rst','RST'],['psh','PSH'],['urg','URG']];
+  const set=new Set((sel||'').split(',').map(s=>s.trim()).filter(Boolean));
+  return '<div class="checks">'+all.map(([v,l])=>`<label><input type="checkbox" id="${prefix}-${v}" ${set.has(v)?'checked':''}> ${l}</label>`).join('')+'</div>';
+}
+function readFlags(prefix){ return ['syn','ack','fin','rst','psh','urg'].filter(v=>$('#'+prefix+'-'+v)&&$('#'+prefix+'-'+v).checked).join(','); }
+const WD=[['mon','一'],['tue','二'],['wed','三'],['thu','四'],['fri','五'],['sat','六'],['sun','日']];
+function weekdayGroup(sel){ const set=new Set((sel||'').split(',').map(s=>s.trim()).filter(Boolean)); return '<div class="checks">'+WD.map(([v,l])=>`<label><input type="checkbox" id="f-wd-${v}" ${set.has(v)?'checked':''}> 周${l}</label>`).join('')+'</div>'; }
+function readWeekdays(){ return WD.map(([v])=>v).filter(v=>$('#f-wd-'+v)&&$('#f-wd-'+v).checked); }
+
 function openForm(r){
-  const v=k=>r&&r.detail? '':'';
+  // 解析时间字段 "09:00-18:00 mon,tue"
+  let tStart='',tEnd='',tDays='';
+  if(r&&r.time){ const sp=(r.time||'').split(' '); if(sp[0]&&sp[0].includes('-')){ const p=sp[0].split('-'); tStart=p[0]||''; tEnd=p[1]||''; } if(sp[1]) tDays=sp[1]; }
+  // 解析 geoip 字段 "allow:CN,US" / "CN,US" / "deny:CN,US"
+  let geoMode='deny',geoCountries='';
+  if(r&&r.geoip){ let g=r.geoip; if(g.startsWith('allow:')){geoMode='allow';g=g.slice(6);} else if(g.startsWith('deny:')){geoMode='deny';g=g.slice(5);} geoCountries=g; }
+  const nat=r&&r.nat?r.nat:null;
+  const ipOpts='<option value="">（不使用）</option>'+IPGROUPS.map(g=>`<option value="${esc(g.name)}" ${r&&r.ip_group===g.name?'selected':''}>${esc(g.name)}</option>`).join('');
+  const APP=['http','tls','ssh','ftp','smtp','imap','mysql','postgresql','redis','mongodb','dns','ntp','snmp','sip'];
+  const appOpts='<option value="">（不限制）</option>'+APP.map(a=>`<option value="${a}" ${r&&r.app_proto===a?'selected':''}>${a}</option>`).join('');
+
   $('#modal-body').innerHTML=`<h3>${r?'编辑规则 #'+r.index:'新增规则'}</h3>
-    <div class="field"><label>动作</label><select id="f-action"><option ${!r||r.action==='ACCEPT'?'selected':''}>ACCEPT</option><option ${r&&r.action==='DROP'?'selected':''}>DROP</option><option ${r&&r.action==='REJECT'?'selected':''}>REJECT</option><option ${r&&r.action==='LOG'?'selected':''}>LOG</option></select></div>
-    <div class="field"><label>协议 (留空=any)</label><input id="f-proto" placeholder="tcp / udp / icmp"></div>
-    <div class="field"><label>源 IP (留空=any)</label><input id="f-sip" placeholder="203.0.113.0/24"></div>
-    <div class="field"><label>目的 IP (留空=any)</label><input id="f-dip" placeholder="10.0.0.0/8"></div>
-    <div class="field"><label>目的端口 (留空=any)</label><input id="f-dport" placeholder="80,443"></div>
-    <div class="field"><label>方向</label><select id="f-dir"><option value="">any</option><option value="in">in</option><option value="out">out</option></select></div>
-    <div class="field"><label>注释</label><input id="f-comment" placeholder="备注"></div>
-    <div class="modal-actions"><button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="submitForm(${r?r.index:'null'})">保存</button></div>`;
-  if(r){ const m=(r.detail||'').match(/(\w+)\s+([^ ]*):?(\S*)\s*->\s*([^ ]*):?(\S*)/); if(m){ $('#f-proto').value=m[1]&&m[1]!=='any'?m[1]:''; $('#f-dport').value=(m[5]&&m[5]!=='any')?m[5]:''; } $('#f-comment').value=r.comment||''; }
+  <div class="form-scroll">
+    <fieldset><legend>基础</legend>
+      <div class="grid2">
+        <div class="field"><label>动作</label><select id="f-action"><option ${!r||r.action==='ACCEPT'?'selected':''}>ACCEPT</option><option ${r&&r.action==='DROP'?'selected':''}>DROP</option><option ${r&&r.action==='REJECT'?'selected':''}>REJECT</option><option ${r&&r.action==='LOG'?'selected':''}>LOG</option></select></div>
+        <div class="field"><label>规则名称（可选）</label><input id="f-name" placeholder="block-bad-net" value="${esc(r?r.name:'')}"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>协议 (留空=any)</label><input id="f-proto" placeholder="tcp / udp / icmp" value="${esc(r?r.protocol:'')}"></div>
+        <div class="field"><label>方向</label><select id="f-dir"><option value="">any</option><option value="in" ${r&&r.direction==='in'?'selected':''}>in</option><option value="out" ${r&&r.direction==='out'?'selected':''}>out</option></select></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>源 IP (留空=any)</label><input id="f-sip" placeholder="203.0.113.0/24" value="${esc(r?r.src_ip:'')}"></div>
+        <div class="field"><label>目的 IP (留空=any)</label><input id="f-dip" placeholder="10.0.0.0/8" value="${esc(r?r.dst_ip:'')}"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>源端口 (留空=any)</label><input id="f-sport" placeholder="1024-65535" value="${esc(r?r.src_port:'')}"></div>
+        <div class="field"><label>目的端口 (留空=any)</label><input id="f-dport" placeholder="80,443" value="${esc(r?r.dst_port:'')}"></div>
+      </div>
+      <div class="field"><label>注释</label><input id="f-comment" placeholder="备注" value="${esc(r?r.comment:'')}"></div>
+    </fieldset>
+
+    <fieldset><legend>高级匹配</legend>
+      <div class="grid2">
+        <div class="field"><label>源 MAC (留空=any)</label><input id="f-smac" placeholder="00:11:22:33:44:55" value="${esc(r?r.src_mac:'')}"></div>
+        <div class="field"><label>目的 MAC (留空=any)</label><input id="f-dmac" placeholder="00:11:22:33:44:55" value="${esc(r?r.dst_mac:'')}"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>VLAN ID (留空=any)</label><input id="f-vlan" type="number" min="1" max="4094" placeholder="10" value="${r&&r.vlan?r.vlan:''}"></div>
+        <div class="field"><label>连接状态</label><select id="f-state"><option value="">（不限）</option><option value="new" ${r&&r.state==='new'?'selected':''}>new</option><option value="established" ${r&&r.state==='established'?'selected':''}>established</option><option value="related" ${r&&r.state==='related'?'selected':''}>related</option><option value="invalid" ${r&&r.state==='invalid'?'selected':''}>invalid</option></select></div>
+      </div>
+      <div class="field"><label>TCP 标志位 (set)</label>${flagsGroup('f-tf', r?r.tcp_flags:'')}</div>
+      <div class="field"><label>TCP 标志位掩码 (mask，可选)</label>${flagsGroup('f-tfm', r?r.tcp_flags_mask:'')}</div>
+    </fieldset>
+
+    <fieldset><legend>时段策略</legend>
+      <div class="grid2">
+        <div class="field"><label>开始时间</label><input id="f-time-start" type="time" value="${tStart}"></div>
+        <div class="field"><label>结束时间</label><input id="f-time-end" type="time" value="${tEnd}"></div>
+      </div>
+      <div class="field"><label>生效星期（不选=每天）</label>${weekdayGroup(tDays)}</div>
+    </fieldset>
+
+    <fieldset><legend>限速 / 带宽 / 并发</legend>
+      <div class="grid2">
+        <div class="field"><label>包速率限制 (包/秒)</label><input id="f-rate" type="number" min="0" placeholder="100" value="${r&&r.rate_limit?r.rate_limit:''}"></div>
+        <div class="field"><label>突发 (burst)</label><input id="f-burst" type="number" min="0" placeholder="与速率相同" value="${r&&r.burst?r.burst:''}"></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);margin-bottom:10px"><input type="checkbox" id="f-per-src" ${r&&r.per_src?'checked':''} style="width:auto"> 按源 IP 分别限流</label>
+      <div class="grid2">
+        <div class="field"><label>带宽限制 (Mbps)</label><input id="f-bandwidth" type="number" min="0" step="0.1" placeholder="50" value="${r&&r.bandwidth?r.bandwidth:''}"></div>
+        <div class="field"><label>带宽突发字节</label><input id="f-burst-bytes" type="number" min="0" placeholder="默认=1秒带宽" value="${r&&r.burst_bytes?r.burst_bytes:''}"></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);margin-bottom:10px"><input type="checkbox" id="f-bw-per-src" style="width:auto"> 带宽按源 IP 分别限制</label>
+      <div class="grid2">
+        <div class="field"><label>并发连接限制</label><input id="f-conn" type="number" min="0" placeholder="1000" value="${r&&r.conn_limit?r.conn_limit:''}"></div>
+        <div></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted)"><input type="checkbox" id="f-conn-per-src" style="width:auto"> 并发连接按源 IP 分别限制</label>
+    </fieldset>
+
+    <fieldset><legend>地理 & 地址簿</legend>
+      <div class="field"><label>GeoIP 国家策略</label><select id="f-geoip-mode"><option value="deny" ${geoMode==='deny'?'selected':''}>拒绝列表内国家 (deny)</option><option value="allow" ${geoMode==='allow'?'selected':''}>仅允许列表内国家 (allow)</option></select></div>
+      <div class="field"><label>国家代码 (逗号分隔，如 CN,US,RU)</label><input id="f-geoip-countries" placeholder="CN,US" value="${esc(geoCountries)}"></div>
+      <div class="field"><label>引用地址簿</label><select id="f-ip-group">${ipOpts}</select></div>
+    </fieldset>
+
+    <fieldset><legend>应用层 (DPI)</legend>
+      <div class="field"><label>匹配应用层协议</label><select id="f-app-proto">${appOpts}</select></div>
+      <div class="hint">基于深度包检测识别的应用协议，需引擎 DPI 模块启用。</div>
+    </fieldset>
+
+    <fieldset><legend>转发 (NAT)</legend>
+      <div class="field"><label>NAT 类型</label><select id="f-nat-type"><option value="">不启用 NAT</option><option value="snat" ${nat&&nat.type==='snat'?'selected':''}>snat（源地址转换）</option><option value="dnat" ${nat&&nat.type==='dnat'?'selected':''}>dnat（目的地址转换）</option><option value="masquerade" ${nat&&nat.type==='masquerade'?'selected':''}>masquerade（出接口伪装）</option></select></div>
+      <div class="grid2">
+        <div class="field"><label>转换后源 IP</label><input id="f-nat-sip" placeholder="192.168.1.1" value="${esc(nat?nat.to_src_ip:'')}"></div>
+        <div class="field"><label>转换后源端口</label><input id="f-nat-sport" type="number" min="0" placeholder="0" value="${nat&&nat.to_src_port?nat.to_src_port:''}"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>转换后目的 IP</label><input id="f-nat-dip" placeholder="10.0.0.10" value="${esc(nat?nat.to_dst_ip:'')}"></div>
+        <div class="field"><label>转换后目的端口</label><input id="f-nat-dport" type="number" min="0" placeholder="0" value="${nat&&nat.to_dst_port?nat.to_dst_port:''}"></div>
+      </div>
+    </fieldset>
+  </div>
+  <div class="modal-actions"><button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="submitForm(${r?r.index:'null'})">保存</button></div>`;
   $('#modal').classList.add('show');
 }
 async function submitForm(idx){
   const body={action:$('#f-action').value};
-  const grab=(id,v)=>{const x=$(id).value.trim(); if(x)body[v]=x;};
-  grab('#f-proto','protocol'); grab('#f-sip','src_ip'); grab('#f-dip','dst_ip'); grab('#f-dport','dst_port'); grab('#f-dir','direction'); grab('#f-comment','comment');
+  const g=s=>{const x=$(s).value.trim(); if(x)body[s.replace('#f-','')]=x;};
+  g('#f-name'); g('#f-proto'); g('#f-sip'); g('#f-dip'); g('#f-sport'); g('#f-dport'); g('#f-smac'); g('#f-dmac');
+  const dir=$('#f-dir').value; if(dir) body.direction=dir;
+  const st=$('#f-state').value; if(st) body.state=st;
+  const vlan=+$('#f-vlan').value; if(vlan>0) body.vlan=vlan;
+  const tf=readFlags('f-tf'); if(tf) body.tcp_flags=tf;
+  const tfm=readFlags('f-tfm'); if(tfm) body.tcp_flags_mask=tfm;
+  // 时段
+  const ts=$('#f-time-start').value, te=$('#f-time-end').value, days=readWeekdays();
+  if(ts&&te){ let t=ts+'-'+te; if(days.length) t+=' '+days.join(','); body.time=t; }
+  // 限速
+  const rl=+$('#f-rate').value; if(rl>0){ body.rate_limit=rl; const b=+$('#f-burst').value; if(b>0) body.burst=b; if($('#f-per-src').checked) body.per_src=true; }
+  const bw=+$('#f-bandwidth').value; if(bw>0){ body.bandwidth=bw; const bb=+$('#f-burst-bytes').value; if(bb>0) body.burst_bytes=bb; if($('#f-bw-per-src').checked) body.per_src=true; }
+  const cl=+$('#f-conn').value; if(cl>0){ body.conn_limit=cl; if($('#f-conn-per-src').checked) body.per_src=true; }
+  // GeoIP
+  const gc=$('#f-geoip-countries').value.trim();
+  if(gc){ const gm=$('#f-geoip-mode').value; body.geoip = gm==='allow' ? 'allow:'+gc : gc; }
+  // 地址簿
+  const ig=$('#f-ip-group').value; if(ig) body.ip_group=ig;
+  // DPI
+  const ap=$('#f-app-proto').value; if(ap) body.app_proto=ap;
+  // NAT
+  const natType=$('#f-nat-type').value;
+  if(natType){ body.nat={type:natType, to_src_ip:$('#f-nat-sip').value.trim(), to_src_port:+$('#f-nat-sport').value||0, to_dst_ip:$('#f-nat-dip').value.trim(), to_dst_port:+$('#f-nat-dport').value||0}; }
+  // 注释（空也允许清除）
+  body.comment=$('#f-comment').value.trim();
   const url=idx==null?'/api/rules':'/api/rules/'+idx;
   const r=await api(idx==null?'POST':'PUT',url,body);
   if(r.ok){ closeModal(); toast('已保存'); loadRules(); } else { const j=await r.json().catch(()=>({})); toast(j.error||'保存失败'); }
@@ -331,6 +522,22 @@ function toggleYAML(){ yamlMode=!yamlMode; $('#yaml-box').style.display=yamlMode
 async function loadConfig(){ const t=await api('GET','/api/config'); $('#cfg-text').value=await t.text(); if(yamlMode)$('#yaml-text').value=$('#cfg-text').value; }
 async function saveYAML(){ const rr=await fetch('/api/config',{method:'PUT',headers:{'Content-Type':'text/plain'},body:$('#yaml-text').value,credentials:'same-origin'}); if(rr.ok){toast('已保存并热应用');loadRules();} else toast('保存失败'); }
 async function saveConfig(){ const rr=await fetch('/api/config',{method:'PUT',headers:{'Content-Type':'text/plain'},body:$('#cfg-text').value,credentials:'same-origin'}); if(rr.ok){toast('已保存');} else toast('保存失败'); }
+
+/* ---- 地址簿 ---- */
+async function loadIPGroups(){
+  const d=await jget('/api/ipgroups');
+  $('#ig-count').textContent='· 共 '+(d.groups?d.groups.length:0)+' 组';
+  let rows=(d.groups||[]).map(g=>`<tr><td class="mono">${esc(g.name)}</td><td class="mono">${esc(g.cidr)}</td><td class="row-actions"><button class="btn sm danger" onclick="delIPGroup('${encodeURIComponent(g.name)}')">删除</button></td></tr>`).join('');
+  $('#ipgroups-table').innerHTML=`<table><thead><tr><th>分组名</th><th>CIDR / IP</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=3 class="empty">暂无地址簿</td></tr>'}</tbody></table>`;
+}
+async function addIPGroup(){
+  const name=$('#ig-name').value.trim(), cidr=$('#ig-cidr').value.trim();
+  if(!name||!cidr){ toast('请填写分组名和 CIDR'); return; }
+  const r=await api('POST','/api/ipgroups',{name,cidr});
+  if(r.ok){ $('#ig-name').value=''; $('#ig-cidr').value=''; toast('已保存'); loadIPGroups(); loadRules(); }
+  else { const j=await r.json().catch(()=>({})); toast(j.error||'保存失败'); }
+}
+async function delIPGroup(name){ name=decodeURIComponent(name); if(!confirm('删除地址簿「'+name+'」？'))return; const r=await api('DELETE','/api/ipgroups/'+name); if(r.ok){toast('已删除');loadIPGroups();loadRules();} else toast('删除失败'); }
 
 /* ---- 实时拦截流 ---- */
 async function liveTick(){
@@ -351,8 +558,29 @@ async function connTick(){
   $('#conns-table').innerHTML=`<table><thead><tr><th>源</th><th>目的</th><th>协议</th><th>状态</th><th>包</th><th>字节</th></tr></thead><tbody>${rows||'<tr><td colspan=6 class="empty">无连接</td></tr>'}</tbody></table>`;
 }
 
+/* ---- 能力中心 ---- */
+async function sysTick(){
+  let d;
+  try{ d=await jget('/api/system'); }catch(e){ return; }
+  const geo=d.geoip||{}, dpi=d.dpi||{}, ct=d.conntrack||{}, eng=d.engine||{};
+  const caps=[
+    {name:'GeoIP 地理位置', desc:'按源 IP 国家做 allow/deny 匹配，需加载 IP 库', on:geo.loaded, onText:'已加载', offText:'未加载', extra:[['国家条目',fmt(geo.count)||0]]},
+    {name:'DPI 深度包检测', desc:'识别 HTTP/TLS/SSH/DNS 等应用层协议', on:dpi.enabled, onText:'已启用', offText:'未启用', chips:dpi.protocols||[]},
+    {name:'连接跟踪', desc:'TCP 状态机 + UDP/ICMP 连接表', on:true, onText:'运行中', offText:'停止', extra:[['总连接',ct.total||0],['已建立',ct.established||0],['TCP',ct.tcp||0],['UDP',ct.udp||0]]},
+    {name:'IP 分片重组', desc:'跨分片包重组后统一匹配', on:d.frag&&d.frag.enabled, onText:'已启用', offText:'未启用'},
+    {name:'引擎统计', desc:'实时包量 / 放行 / 拦截计数', on:true, onText:'运行中', offText:'停止', extra:[['总包',fmt(eng.packets)||0],['放行',fmt(eng.accepted)||0],['拦截',fmt(eng.dropped)||0],['流量',fmt(eng.bytes)||0]]}
+  ];
+  $('#cap-grid').innerHTML=caps.map(c=>{
+    const st=`<span class="status ${c.on?'on':'off'}">${c.on?c.onText:c.offText}</span>`;
+    let body='';
+    if(c.chips&&c.chips.length){ body='<div class="chips">'+c.chips.map(x=>`<span class="chip">${esc(x)}</span>`).join('')+'</div>'; }
+    else if(c.extra){ body=c.extra.map(([k,v])=>`<div class="kv"><span>${k}</span><b>${esc(v)}</b></div>`).join(''); }
+    return `<div class="cap"><h3>${esc(c.name)} ${st}</h3><div class="desc">${esc(c.desc)}</div>${body}</div>`;
+  }).join('');
+}
+
 /* ---- 导航 ---- */
-const titles={overview:'概览',rules:'规则管理',live:'实时拦截',conns:'连接跟踪',config:'配置源'};
+const titles={overview:'概览',rules:'规则管理',ipgroups:'地址簿',live:'实时拦截',conns:'连接跟踪',system:'能力中心',config:'配置源'};
 document.querySelectorAll('.nav-btn').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
@@ -360,7 +588,10 @@ document.querySelectorAll('.nav-btn').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
   $('#sec-'+s).classList.add('active');
   $('#page-title').textContent=titles[s];
-  if(s==='rules')loadRules(); if(s==='config')loadConfig();
+  if(s==='rules')loadRules();
+  if(s==='ipgroups')loadIPGroups();
+  if(s==='config')loadConfig();
+  if(s==='system')sysTick();
 });
 checkAuth();
 </script>

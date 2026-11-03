@@ -68,6 +68,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/conns", s.auth(s.handleConns))
 	mux.HandleFunc("/api/config", s.auth(s.handleConfig))
 	mux.HandleFunc("/api/reload", s.auth(s.handleReload))
+	mux.HandleFunc("/api/system", s.auth(s.handleSystem))
+	mux.HandleFunc("/api/ipgroups", s.auth(s.handleIPGroups))
+	mux.HandleFunc("/api/ipgroups/", s.auth(s.handleIPGroups))
 	mux.HandleFunc("/", s.auth(s.handleIndex))
 
 	srv := &http.Server{
@@ -196,20 +199,202 @@ func (s *Server) handleRulesList(w http.ResponseWriter, r *http.Request) {
 	rs := s.rsPtr.Load()
 	var ruleList []map[string]interface{}
 	for i, rl := range rs.Rules {
-		ruleList = append(ruleList, map[string]interface{}{
-			"index":   i,
-			"action":  rl.Action,
-			"detail":  rl.String(),
-			"hits":    rl.HitCount(),
-			"bytes":   rl.HitBytes(),
-			"comment": rl.Comment,
-		})
+		rm := ruleToMap(rl)
+		rm["index"] = i
+		ruleList = append(ruleList, rm)
+	}
+	var groups []map[string]interface{}
+	for name, m := range rs.IPGroups {
+		groups = append(groups, map[string]interface{}{"name": name, "cidr": m.String()})
 	}
 	writeJSON(w, map[string]interface{}{
-		"default": rs.DefaultAction,
-		"rules":   ruleList,
-		"stats":   eng.RuleStats(),
+		"default":   rs.DefaultAction,
+		"rules":     ruleList,
+		"ip_groups": groups,
+		"stats":     eng.RuleStats(),
 	})
+}
+
+// ruleToMap 将引擎 Rule 完整序列化为前端表单可用的结构（覆盖全部引擎字段）。
+func ruleToMap(rl *rules.Rule) map[string]interface{} {
+	m := map[string]interface{}{
+		"action":  rl.Action,
+		"name":    rl.Name,
+		"comment": rl.Comment,
+		"detail":  rl.String(),
+		"hits":    rl.HitCount(),
+		"bytes":   rl.HitBytes(),
+	}
+	if rl.SrcIP.String() != "any" {
+		m["src_ip"] = rl.SrcIP.String()
+	}
+	if rl.DstIP.String() != "any" {
+		m["dst_ip"] = rl.DstIP.String()
+	}
+	if rl.SrcMAC.String() != "any" {
+		m["src_mac"] = rl.SrcMAC.String()
+	}
+	if rl.DstMAC.String() != "any" {
+		m["dst_mac"] = rl.DstMAC.String()
+	}
+	if rl.Protocol != nil {
+		switch *rl.Protocol {
+		case 6:
+			m["protocol"] = "tcp"
+		case 17:
+			m["protocol"] = "udp"
+		case 1:
+			m["protocol"] = "icmp"
+		case 58:
+			m["protocol"] = "icmpv6"
+		}
+	}
+	if rl.SrcPort != nil && rl.SrcPort.String() != "any" {
+		m["src_port"] = rl.SrcPort.String()
+	}
+	if rl.DstPort != nil && rl.DstPort.String() != "any" {
+		m["dst_port"] = rl.DstPort.String()
+	}
+	if rl.TCPFlags != 0 {
+		m["tcp_flags"] = rules.TCPFlagsToString(rl.TCPFlags)
+		if rl.TCPFlagsMask != 0 && rl.TCPFlagsMask != rl.TCPFlags {
+			m["tcp_flags_mask"] = rules.TCPFlagsToString(rl.TCPFlagsMask)
+		}
+	}
+	if rl.Direction != rules.DirAny {
+		m["direction"] = rl.Direction
+	}
+	if rl.State != "" {
+		m["state"] = rl.State
+	}
+	if rl.VLAN != nil {
+		m["vlan"] = int(*rl.VLAN)
+	}
+	if rl.Time != nil && rl.Time.String() != "" {
+		m["time"] = rl.Time.String()
+	}
+	if rl.RateLimit != nil && rl.RateLimit.Rate > 0 {
+		m["rate_limit"] = rl.RateLimit.Rate
+		m["burst"] = rl.RateLimit.Burst
+		m["per_src"] = rl.RateLimit.PerSrc
+	}
+	if rl.Bandwidth != nil && rl.Bandwidth.BytesPerSec > 0 {
+		m["bandwidth"] = float64(rl.Bandwidth.BytesPerSec) * 8 / 1024 / 1024
+		m["burst_bytes"] = rl.Bandwidth.Burst
+		m["per_src"] = m["per_src"] == true || rl.Bandwidth.PerSrc
+	}
+	if rl.ConnLimit != nil && rl.ConnLimit.Max > 0 {
+		m["conn_limit"] = rl.ConnLimit.Max
+		m["per_src"] = m["per_src"] == true || rl.ConnLimit.PerSrc
+	}
+	if rl.GeoIP != nil {
+		if s := rl.GeoIP.String(); s != "" {
+			m["geoip"] = s
+		}
+	}
+	if rl.AppProto != "" {
+		m["app_proto"] = rl.AppProto
+	}
+	if rl.IPGroup != "" {
+		m["ip_group"] = rl.IPGroup
+	}
+	if rl.NAT != nil {
+		m["nat"] = map[string]interface{}{
+			"type":        rl.NAT.Type,
+			"to_src_ip":   rl.NAT.ToSrcIP,
+			"to_src_port": int(rl.NAT.ToSrcPort),
+			"to_dst_ip":   rl.NAT.ToDstIP,
+			"to_dst_port": int(rl.NAT.ToDstPort),
+		}
+	}
+	return m
+}
+
+// handleSystem 返回引擎模块能力状态，供「能力中心」页展示。
+func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
+	eng := s.engPtr.Load()
+	geoLoaded, geoCount := false, 0
+	if eng.GeoIP != nil {
+		geoLoaded = eng.GeoIP.Loaded()
+		geoCount = eng.GeoIP.Count()
+	}
+	writeJSON(w, map[string]interface{}{
+		"geoip": map[string]interface{}{
+			"loaded": geoLoaded,
+			"count":  geoCount,
+		},
+		"dpi": map[string]interface{}{
+			"enabled": true,
+			"protocols": []string{"http", "tls", "ssh", "ftp", "smtp", "imap",
+				"mysql", "postgresql", "redis", "mongodb", "dns", "ntp", "snmp", "sip"},
+		},
+		"conntrack": eng.Conntrack.Stats(),
+		"frag":      map[string]interface{}{"enabled": true},
+		"engine":    eng.Stats(),
+	})
+}
+
+// handleIPGroups 管理 IP 地址簿（ip_groups）。GET 列表，POST 新增/更新，DELETE 删除。
+func (s *Server) handleIPGroups(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		rs := s.rsPtr.Load()
+		var groups []map[string]interface{}
+		for name, m := range rs.IPGroups {
+			groups = append(groups, map[string]interface{}{"name": name, "cidr": m.String()})
+		}
+		writeJSON(w, map[string]interface{}{"groups": groups})
+	case http.MethodPost:
+		var body struct {
+			Name string `json:"name"`
+			CIDR string `json:"cidr"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		body.Name = strings.TrimSpace(body.Name)
+		body.CIDR = strings.TrimSpace(body.CIDR)
+		if body.Name == "" || body.CIDR == "" {
+			writeError(w, http.StatusBadRequest, "name and cidr are required")
+			return
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		newRS := s.cloneRuleset()
+		newRS.IPGroups[body.Name] = rules.ParseIPMatcher(body.CIDR)
+		if err := s.commit(newRS); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]interface{}{"status": "ok", "name": body.Name})
+	case http.MethodDelete:
+		name, ok := parseName(r.URL.Path)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "invalid name")
+			return
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		newRS := s.cloneRuleset()
+		delete(newRS.IPGroups, name)
+		if err := s.commit(newRS); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]interface{}{"status": "ok"})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// parseName 从 /api/ipgroups/{name} 解析名称。
+func parseName(path string) (string, bool) {
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(parts) != 3 || parts[0] != "api" || parts[1] != "ipgroups" {
+		return "", false
+	}
+	if parts[2] == "" {
+		return "", false
+	}
+	return parts[2], true
 }
 
 // handleRuleAdd POST /api/rules - 添加一条规则。
