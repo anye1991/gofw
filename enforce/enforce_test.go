@@ -206,3 +206,207 @@ func TestBuildScriptGeoIPFromCSVLibrary(t *testing.T) {
 	}
 }
 
+// 内核限速（按源）：accept 规则应额外生成 meter 动态集 + limit rate over 的"超限丢弃"语句，
+// 实现"单源限速、超限即丢"。此前该能力只在用户态 engine 生效，内核强制模式是空操作。
+func TestRuleLimitStmtsRatePerSrc(t *testing.T) {
+	proto := uint8(6)
+	r := rules.NewRule(rules.ActionAccept)
+	r.Protocol = &proto
+	r.DstPort = rules.ParsePortSpec("22")
+	r.Direction = rules.DirIn
+	r.RateLimit = rules.ParseRateLimit(5, 10, true)
+	n := &NftablesEnforcer{}
+	got := n.ruleLimitStmts(r, "input")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 limit stmt, got %d: %v", len(got), got)
+	}
+	want := "tcp dport 22 meter size 65535 { ip saddr timeout 1m limit rate over 5/second burst 10 packets drop }"
+	if got[0] != want {
+		t.Errorf("per-src rate limit mismatch:\n got: %q\nwant: %q", got[0], want)
+	}
+}
+
+// 全局限速（非 per_src）：无 meter，直接 limit rate over ... drop。
+func TestRuleLimitStmtsRateGlobal(t *testing.T) {
+	proto := uint8(6)
+	r := rules.NewRule(rules.ActionAccept)
+	r.Protocol = &proto
+	r.DstPort = rules.ParsePortSpec("443")
+	r.Direction = rules.DirIn
+	r.RateLimit = rules.ParseRateLimit(100, 0, false)
+	n := &NftablesEnforcer{}
+	got := n.ruleLimitStmts(r, "input")
+	want := "tcp dport 443 limit rate over 100/second burst 100 packets drop"
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("global rate limit mismatch: got %v", got)
+	}
+}
+
+// 并发连接数限制（按源）：应生成 ct state new + ct count over N + meter 的"超限丢弃"语句。
+func TestRuleLimitStmtsConnPerSrc(t *testing.T) {
+	proto := uint8(6)
+	r := rules.NewRule(rules.ActionAccept)
+	r.Protocol = &proto
+	r.DstPort = rules.ParsePortSpec("80,443")
+	r.Direction = rules.DirIn
+	r.ConnLimit = rules.ParseConnLimit(200, true)
+	n := &NftablesEnforcer{}
+	got := n.ruleLimitStmts(r, "input")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 stmt, got %v", got)
+	}
+	want := "tcp dport { 80, 443 } meter size 65535 { ip saddr timeout 1m ct state new ct count over 200 drop }"
+	if got[0] != want {
+		t.Errorf("per-src conn limit mismatch:\n got: %q\nwant: %q", got[0], want)
+	}
+}
+
+// drop 规则不应生成任何限速语句（本就全丢，限速门无意义）。
+func TestRuleLimitStmtsDropRuleEmpty(t *testing.T) {
+	proto := uint8(6)
+	r := rules.NewRule(rules.ActionDrop)
+	r.Protocol = &proto
+	r.DstPort = rules.ParsePortSpec("22")
+	r.RateLimit = rules.ParseRateLimit(5, 10, true)
+	n := &NftablesEnforcer{}
+	if stmts := n.ruleLimitStmts(r, "input"); len(stmts) != 0 {
+		t.Errorf("drop rule must not emit limit stmts, got %v", stmts)
+	}
+}
+
+// buildScript 中限速语句应排在主放行语句之前（先丢超限包，再放行未超限包）。
+func TestBuildScriptRateOrderBeforeAccept(t *testing.T) {
+	proto := uint8(6)
+	r := rules.NewRule(rules.ActionAccept)
+	r.Protocol = &proto
+	r.DstPort = rules.ParsePortSpec("22")
+	r.Direction = rules.DirIn
+	r.RateLimit = rules.ParseRateLimit(5, 10, true)
+	rs := rules.NewRuleSet()
+	rs.Add(r)
+	n := &NftablesEnforcer{}
+	script := n.buildScript(rs)
+	t.Log(script)
+	iLimit := strings.Index(script, "limit rate over 5/second burst 10 packets drop")
+	iAccept := strings.Index(script, "tcp dport 22 accept")
+	if iLimit < 0 || iAccept < 0 {
+		t.Fatalf("expected both limit and accept in script:\n%s", script)
+	}
+	if iLimit > iAccept {
+		t.Errorf("limit stmt must precede accept stmt:\n%s", script)
+	}
+}
+
+// NULL 扫描（set 为空 + mask 全标志）：应编译为 "tcp flags & (mask) == 0" 形式，
+// 匹配所有标志位均为 0 的隐蔽扫描包。此前 TCPFlags==0 时整段匹配被跳过，无法表达。
+func TestRuleToNftNullScan(t *testing.T) {
+	proto := uint8(6)
+	r := rules.NewRule(rules.ActionDrop)
+	r.Protocol = &proto
+	r.Direction = rules.DirIn
+	r.TCPFlagsMask = 0x3f // fin|syn|rst|psh|ack|urg
+	n := &NftablesEnforcer{}
+	got := n.ruleToNft(r, "input")
+	if !strings.Contains(got, "tcp flags & (") || !strings.Contains(got, ") == (0) drop") {
+		t.Errorf("null scan should compile to 'tcp flags & (mask) == (0) drop', got %q", got)
+	}
+	for _, f := range []string{"fin", "syn", "rst", "psh", "ack", "urg"} {
+		if !strings.Contains(got, f) {
+			t.Errorf("null scan mask should contain %s, got %q", f, got)
+		}
+	}
+}
+
+// 回归：direction:in 的规则只允许出现在 input 链。
+// 若在 output/forward 链退化成无匹配器的裸 accept/drop，会误放行/误丢弃全链流量。
+func TestDirectionInOnlyInputChain(t *testing.T) {
+	proto := uint8(6)
+	r := rules.NewRule(rules.ActionAccept)
+	r.Protocol = &proto
+	r.DstPort = rules.ParsePortSpec("22")
+	r.Direction = rules.DirIn
+	r.RateLimit = rules.ParseRateLimit(5, 10, true)
+	rs := rules.NewRuleSet()
+	rs.Add(r)
+	n := &NftablesEnforcer{}
+	script := n.buildScript(rs)
+	t.Log(script)
+	// output 链与 forward 链的链身（去掉链头 type/policy 声明行）必须没有任何规则语句
+	for _, chain := range []string{"chain output {", "chain forward {"} {
+		i := strings.Index(script, chain)
+		if i < 0 {
+			t.Fatalf("script missing %s:\n%s", chain, script)
+		}
+		rest := script[i+len(chain):]
+		if j := strings.Index(rest, "}"); j >= 0 {
+			rest = rest[:j]
+		}
+		var body []string
+		for _, line := range strings.Split(rest, "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "type filter") {
+				body = append(body, line)
+			}
+		}
+		if len(body) != 0 {
+			t.Errorf("%s must have no rule statements, got %d:\n%s", chain, len(body), script)
+		}
+	}
+}
+
+// 回归：GeoIP 库缺数据的规则必须整条跳过，
+// 不得退化成无匹配器的裸 accept/drop（否则会误杀全网或误放行）。
+func TestGeoIPMissingDataNotBareAction(t *testing.T) {
+	db := geoip.NewWithBuiltin() // 内置库无 ZZ
+	rs := rules.NewRuleSet()
+	rs.Add(&rules.Rule{Action: rules.ActionDrop, GeoIP: rules.ParseGeoIPSpec("ZZ"), Direction: rules.DirIn})
+	n := &NftablesEnforcer{geoDB: db}
+	script := n.buildScript(rs)
+	t.Log(script)
+	// 三条链都只能是空链（除链头声明外无任何语句）
+	for _, chain := range []string{"chain input {", "chain output {", "chain forward {"} {
+		i := strings.Index(script, chain)
+		if i < 0 {
+			continue
+		}
+		rest := script[i:]
+		if j := strings.Index(rest, "}"); j >= 0 {
+			rest = rest[:j]
+		}
+		body := strings.TrimSpace(rest[len(chain):])
+		if body != "" && !strings.Contains(body, "policy") {
+			t.Errorf("%s should be empty, got:\n%s", chain, script)
+		}
+	}
+}
+// 生产规则(deploy/rules-prod.yaml)必须能被完整加载并编译出全部关键内核语句：
+// 每源限速、并发限制、ICMP flood 限速、NULL 扫描、GeoIP 国家拦截等。
+func TestBuildScriptProdRules(t *testing.T) {
+	rs, err := config.Load("../deploy/rules-prod.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := geoip.NewWithBuiltin()
+	n := &NftablesEnforcer{geoDB: db}
+	script := n.buildScript(rs)
+	t.Log(script)
+	for _, want := range []string{
+		// SSH 每源限速（内核 meter + limit rate over）
+		"meter size 65535 { ip saddr timeout 1m limit rate over 5/second burst 10 packets drop }",
+		// Web 每源并发限制（内核 ct count over）
+		"ct state new ct count over 200 drop",
+		// ICMP flood 每源限速
+		"limit rate over 50/second burst 100 packets drop",
+		// NULL 扫描
+		"== (0) drop",
+		// GeoIP 俄罗斯拦截
+		"ip saddr @geoip_RU drop",
+		// established 优先放行
+		"ct state established accept",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("prod script missing %q\n%s", want, script)
+		}
+	}
+}
+

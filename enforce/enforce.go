@@ -7,6 +7,7 @@ import (
 	"net"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gofw/engine"
@@ -196,6 +197,9 @@ func (n *NftablesEnforcer) buildScript(rs *rules.RuleSet) string {
 		if r.NAT != nil {
 			continue // NAT 规则放到 nat 表
 		}
+		for _, ls := range n.ruleLimitStmts(r, "input") {
+			sb.WriteString("        " + ls + "\n")
+		}
 		if stmt := n.ruleToNft(r, "input"); stmt != "" {
 			sb.WriteString("        " + stmt + "\n")
 		}
@@ -207,6 +211,9 @@ func (n *NftablesEnforcer) buildScript(rs *rules.RuleSet) string {
 		if r.NAT != nil {
 			continue
 		}
+		for _, ls := range n.ruleLimitStmts(r, "output") {
+			sb.WriteString("        " + ls + "\n")
+		}
 		if stmt := n.ruleToNft(r, "output"); stmt != "" {
 			sb.WriteString("        " + stmt + "\n")
 		}
@@ -217,6 +224,9 @@ func (n *NftablesEnforcer) buildScript(rs *rules.RuleSet) string {
 	for _, r := range rs.Rules {
 		if r.NAT != nil {
 			continue
+		}
+		for _, ls := range n.ruleLimitStmts(r, "forward") {
+			sb.WriteString("        " + ls + "\n")
 		}
 		if stmt := n.ruleToNft(r, "forward"); stmt != "" {
 			sb.WriteString("        " + stmt + "\n")
@@ -415,19 +425,23 @@ func (n *NftablesEnforcer) natRuleToNft(r *rules.Rule, natType, family string) s
 	return stmt
 }
 
-func (n *NftablesEnforcer) ruleToNft(r *rules.Rule, chain string) string {
+// buildMatchers 生成规则在指定链上的匹配表达式（不含动作）。
+// 方向过滤、VLAN、L3/L4、MAC、GeoIP、ct state 等匹配都在此组装，
+// 供 ruleToNft（生成主语句）与 ruleLimitStmts（生成限速/并发的超限丢弃语句）复用。
+// ok=false 表示整条规则在该链上应跳过（方向不匹配 / GeoIP 库缺数据），
+// 调用方必须据此跳过，否则会退化成无匹配器的裸 accept/drop 误伤全网。
+func (n *NftablesEnforcer) buildMatchers(r *rules.Rule, chain string) (matchers []string, ok bool) {
 	// 方向过滤：in→input, out→output, any→所有链（含 forward）
 	switch r.Direction {
 	case rules.DirIn:
 		if chain != "input" {
-			return ""
+			return nil, false
 		}
 	case rules.DirOut:
 		if chain != "output" {
-			return ""
+			return nil, false
 		}
 	}
-	var matchers []string
 
 	// VLAN 标签匹配必须显式前置 "ether type vlan"，且位于 L3/L4 匹配之前。
 	// 否则 nftables 会把同规则的 ip/tcp 等 L3/L4 匹配解析为 ether→ip 直接依赖，
@@ -449,11 +463,15 @@ func (n *NftablesEnforcer) ruleToNft(r *rules.Rule, chain string) string {
 				matchers = append(matchers, "tcp sport "+portSpec(r.SrcPort))
 				hasL4 = true
 			}
-			if r.TCPFlags != 0 {
-				setNames := flagNames(r.TCPFlags)
+			if r.TCPFlags != 0 || r.TCPFlagsMask != 0 {
 				mask := r.TCPFlagsMask
 				if mask == 0 {
 					mask = r.TCPFlags
+				}
+				setNames := flagNames(r.TCPFlags)
+				if setNames == "" {
+					// NULL 扫描：掩码内所有标志位全为 0
+					setNames = "0"
 				}
 				maskNames := flagNames(mask)
 				matchers = append(matchers, fmt.Sprintf("tcp flags & (%s) == (%s)", maskNames, setNames))
@@ -501,7 +519,7 @@ func (n *NftablesEnforcer) ruleToNft(r *rules.Rule, chain string) string {
 	if n.geoInfo != nil {
 		if gi := n.geoInfo[r]; gi != nil {
 			if gi.skip {
-				return "" // 整条规则跳过（库里缺数据），交由告警日志提示
+				return nil, false // 整条规则跳过（库里缺数据），交由告警日志提示
 			}
 			addr := "ip saddr"
 			if chain == "output" {
@@ -519,6 +537,16 @@ func (n *NftablesEnforcer) ruleToNft(r *rules.Rule, chain string) string {
 		matchers = append(matchers, "ct state "+r.State)
 	}
 
+	return matchers, true
+}
+
+// ruleToNft 生成规则在指定链上的完整语句（匹配 + 动作）。
+// 方向不匹配 / GeoIP 缺数据时返回空串，由调用方跳过。
+func (n *NftablesEnforcer) ruleToNft(r *rules.Rule, chain string) string {
+	matchers, ok := n.buildMatchers(r, chain)
+	if !ok {
+		return ""
+	}
 	action := actionToNft(r.Action)
 	stmt := action
 	if len(matchers) > 0 {
@@ -528,6 +556,70 @@ func (n *NftablesEnforcer) ruleToNft(r *rules.Rule, chain string) string {
 		stmt += fmt.Sprintf(" comment %q", r.Comment)
 	}
 	return stmt
+}
+
+// ruleLimitStmts 为带速率/并发/带宽限制且基础动作为“放行”的规则，
+// 生成内核层的“超限即丢”语句。语义与用户态 engine.Match 的限速门一致：
+// 规则已命中（按 L3/L4 匹配），若 rate/conn/bandwidth 超限则 DROP，未超限则落到放行主语句。
+// 仅对 accept/log 类规则生成；drop 规则本就全丢，无需重复。
+// 生成顺序在 buildScript 中位于主语句之前，确保超限包先被丢弃、未超限包再被放行。
+func (n *NftablesEnforcer) ruleLimitStmts(r *rules.Rule, chain string) []string {
+	if r.Action == rules.ActionDrop || r.Action == rules.ActionReject {
+		return nil
+	}
+	base, ok := n.buildMatchers(r, chain)
+	if !ok {
+		return nil // 方向不匹配 / GeoIP 缺数据：整条跳过
+	}
+	var out []string
+	// 速率限制（包/秒）：超限丢
+	if r.RateLimit != nil && r.RateLimit.Rate > 0 {
+		rate, burst := r.RateLimit.Rate, r.RateLimit.Burst
+		if burst <= 0 {
+			burst = rate
+		}
+		expr := fmt.Sprintf("limit rate over %d/second burst %d packets drop", rate, burst)
+		out = append(out, n.limitStmt(base, expr, r.RateLimit.PerSrc))
+	}
+	// 并发连接数限制（仅新连接计数）：超限丢
+	if r.ConnLimit != nil && r.ConnLimit.Max > 0 {
+		expr := "ct state new ct count over " + strconv.Itoa(r.ConnLimit.Max) + " drop"
+		// 若规则本身已带 ct state 匹配（如 established），避免重复 ct state 导致语法错误
+		if hasCTState(base) {
+			expr = "ct count over " + strconv.Itoa(r.ConnLimit.Max) + " drop"
+		}
+		out = append(out, n.limitStmt(base, expr, r.ConnLimit.PerSrc))
+	}
+	// 带宽限制（字节/秒）：超限丢
+	if r.Bandwidth != nil && r.Bandwidth.BytesPerSec > 0 {
+		expr := fmt.Sprintf("limit rate over %d bytes/second drop", r.Bandwidth.BytesPerSec)
+		out = append(out, n.limitStmt(base, expr, r.Bandwidth.PerSrc))
+	}
+	return out
+}
+
+// limitStmt 把匹配表达式(base)与超限动作(expr)组装成内核语句。
+// perSrc=true 时用按源 IP 的动态 meter（ip saddr 作键，带超时回收），
+// 实现“每个来源独立限流/限连接”，更接近真实防爆破/抗 DDoS 语义。
+func (n *NftablesEnforcer) limitStmt(base []string, expr string, perSrc bool) string {
+	joined := strings.Join(base, " ")
+	if perSrc {
+		return fmt.Sprintf("%s meter size 65535 { ip saddr timeout 1m %s }", joined, expr)
+	}
+	if joined == "" {
+		return expr
+	}
+	return joined + " " + expr
+}
+
+// hasCTState 判断匹配表达式中是否已含 ct state 子句。
+func hasCTState(matchers []string) bool {
+	for _, m := range matchers {
+		if strings.Contains(m, "ct state") {
+			return true
+		}
+	}
+	return false
 }
 
 func portSpec(ps *rules.PortSpec) string {

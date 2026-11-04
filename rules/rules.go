@@ -769,7 +769,7 @@ func (r *Rule) Match(c MatchContext) bool {
 	if r.DstPort != nil && !r.DstPort.Matches(c.DstPort) {
 		return false
 	}
-	if r.TCPFlags != 0 {
+	if r.TCPFlags != 0 || r.TCPFlagsMask != 0 {
 		mask := r.TCPFlagsMask
 		if mask == 0 {
 			mask = r.TCPFlags

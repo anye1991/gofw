@@ -2,10 +2,15 @@
 # 定位: 作为现有 UFW/iptables 之上的【增强阻断层】
 #   default: accept → 本表只做"精确阻断 + 显式放行"，不叠加 DROP 现有已放行的流量
 #           (避免和 UFW/iptables 叠加后把 SSH/宝塔/MySQL 等掐断)
-# 真正下发的规则: 恶意网段/扫描特征/异常标志位的 DROP，以及 SSH 限速、Web 并发限制等
 #
-# 字段说明见仓库根 rules.yaml 注释。下面仅保留云机适用的部分，去掉了示例里
-# 的 masquerade / dnat 10.0.0.x（那是内网网关假设，云机用不上，且会把 80 转丢）。
+# 内核强制说明:
+#   - 所有 DROP / 限速 / 并发限制 / GeoIP 均编译进 nftables 内核表 table inet gofw，
+#     由内核逐包强制执行（不是用户态旁路嗅探）。
+#   - rate_limit / conn_limit / bandwidth 此前仅在 monitor 模式生效，现已内核化:
+#     超限流量在内核直接丢弃（limit rate over / ct count over / meter 按源）。
+#   - GeoIP: 拦截规则引用的国家会编译成内核命名集合(set geoip_XX)真拦截;
+#     全国家数据由同目录 rules.yaml.geoip 提供(245国/59.7万CIDR)，
+#     无该文件时回退内置精简库(约16地区)。
 
 default: accept
 
@@ -27,13 +32,16 @@ rules:
     dst_ip: 127.0.0.0/8
     comment: loopback
 
-  # ---- 入站 ICMP（ping / 路径 MTU 等） ----
+  # ---- 入站 ICMP（每源限速 50/s，超限内核丢弃，防 ping flood） ----
   - action: ACCEPT
     protocol: icmp
     direction: in
-    comment: inbound icmp
+    rate_limit: 50
+    burst: 100
+    per_src: true
+    comment: inbound icmp (50/s per source, flood dropped)
 
-  # ---- 入站 SSH（带每秒限速，按源独立计数器，防爆破） ----
+  # ---- 入站 SSH（每源限速 5/s 防爆破，超限内核丢弃） ----
   - action: ACCEPT
     protocol: tcp
     dst_port: 22
@@ -41,7 +49,7 @@ rules:
     rate_limit: 5
     burst: 10
     per_src: true
-    comment: inbound SSH (5/s per source)
+    comment: inbound SSH (5/s per source, kernel-enforced)
 
   # ---- 入站 Web（nginx 对外 80/443） ----
   - action: ACCEPT
@@ -57,14 +65,24 @@ rules:
     direction: in
     comment: baota panel ports
 
+  # ---- 单源对 Web 的并发连接数限制（防单 IP 打满；内核 ct count 强制） ----
+  - action: ACCEPT
+    protocol: tcp
+    dst_port: "80,443"
+    conn_limit: 200
+    per_src: true
+    comment: per-source concurrency limit to web (200, kernel-enforced)
+
   # ==================== 以下为真正生效的精确阻断 ====================
 
   # 已知恶意网段（示例，可替换为真实威胁情报）
   - action: DROP
     src_ip: 203.0.113.0/24
-    comment: block known-bad CIDR
+    comment: block known-bad CIDR (TEST-NET-3)
 
-  # Xmas 扫描特征（FIN+PSH+URG 同时置位）
+  # ---- 隐蔽扫描特征（内核丢弃） ----
+
+  # Xmas 扫描（FIN+PSH+URG 同时置位）
   - action: DROP
     protocol: tcp
     tcp_flags:
@@ -72,13 +90,58 @@ rules:
       mask: fin,psh,urg
     comment: block xmas scan
 
-  # 单源对 Web 的并发连接数限制（防单 IP 打满，演示 conn_limit）
-  - action: ACCEPT
+  # NULL 扫描（所有标志位全 0）
+  - action: DROP
     protocol: tcp
-    dst_port: "80,443"
-    conn_limit: 200
-    per_src: true
-    comment: per-source concurrency limit to web (200)
+    tcp_flags:
+      set: ""
+      mask: fin,syn,rst,psh,ack,urg
+    comment: block null scan (all flags zero)
 
-  # （如需 GeoIP / DPI / 时段 等高级规则，可在 Web 面板直接添加；
-  #   例如: action DROP, geoip "deny:XX"，或 app_proto 限制协议）
+  # FIN 扫描（仅 FIN 置位、无 SYN/ACK —— 正常挥手是 FIN+ACK，不受影响）
+  - action: DROP
+    protocol: tcp
+    tcp_flags:
+      set: fin
+      mask: fin,syn,ack
+    comment: block FIN-only stealth scan
+
+  # SYN+FIN 非法组合
+  - action: DROP
+    protocol: tcp
+    tcp_flags:
+      set: syn,fin
+      mask: syn,fin
+    comment: block syn+fin illegal combo
+
+  # SYN+RST 非法组合
+  - action: DROP
+    protocol: tcp
+    tcp_flags:
+      set: syn,rst
+      mask: syn,rst
+    comment: block syn+rst illegal combo
+
+  # ---- 伪造/保留源地址（bogon）丢弃 ----
+  # 仅列明显非法段，避免误伤本机管理网段（管理流量经 NAT 网关，不阻断 RFC1918）
+  - action: DROP
+    src_ip: 0.0.0.0/8
+    comment: drop bogon 0.0.0.0/8
+  - action: DROP
+    src_ip: 127.0.0.0/8
+    comment: drop spoofed loopback source
+  - action: DROP
+    src_ip: 169.254.0.0/16
+    comment: drop link-local source
+  - action: DROP
+    src_ip: 224.0.0.0/4
+    comment: drop multicast source
+  - action: DROP
+    src_ip: 240.0.0.0/4
+    comment: drop reserved source
+
+  # ---- GeoIP 国家拦截（内核命名集合真拦截；全国家库见 rules.yaml.geoip） ----
+  # allow:RU = 拦截来自俄罗斯的流量; deny:XX = 只放行 XX（慎用，影响极大）
+  - action: DROP
+    geoip: allow:RU
+    comment: block inbound traffic from RU
