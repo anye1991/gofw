@@ -350,16 +350,52 @@ func ruleToMap(rl *rules.Rule) map[string]interface{} {
 // handleSystem 返回引擎模块能力状态，供「能力中心」页展示。
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	eng := s.engPtr.Load()
-	geoLoaded, geoCount := false, 0
+	geoLoaded, geoCount, geoV4, geoV6, geoCountries := false, 0, 0, 0, 0
 	if eng.GeoIP != nil {
 		geoLoaded = eng.GeoIP.Loaded()
 		geoCount = eng.GeoIP.Count()
+		var codes []string
+		_, geoV4, geoV6, codes = eng.GeoIP.Stats()
+		geoCountries = len(codes)
+	}
+	// 地理围栏是否启用：按托管规则标记判定，与 /api/geofence 同源，不靠页面猜测。
+	guardCount, fenceCount := 0, 0
+	if rs := s.rsPtr.Load(); rs != nil {
+		for _, rl := range rs.Rules {
+			if strings.HasPrefix(rl.Comment, markGuard) {
+				guardCount++
+			}
+			if strings.HasPrefix(rl.Comment, markGeo) {
+				fenceCount++
+			}
+		}
+	}
+	// 自动封禁配置取运行实例真实值。
+	var banCfg interface{}
+	if s.geoCtl != nil {
+		banCfg = s.geoCtl.GetConfig()
+	}
+	backend := s.backend
+	if backend == "" {
+		backend = "monitor"
 	}
 	writeJSON(w, map[string]interface{}{
+		"backend": backend,
 		"geoip": map[string]interface{}{
-			"loaded": geoLoaded,
-			"count":  geoCount,
+			"loaded":    geoLoaded,
+			"count":     geoCount,
+			"v4":        geoV4,
+			"v6":        geoV6,
+			"countries": geoCountries,
+			"source":    s.geoSource,
+			"path":      s.geoPath,
 		},
+		"geofence": map[string]interface{}{
+			"active": fenceCount > 0,
+			"guards": guardCount,
+			"fences": fenceCount,
+		},
+		"autoban": banCfg,
 		"dpi": map[string]interface{}{
 			"enabled": true,
 			"protocols": []string{"http", "tls", "ssh", "ftp", "smtp", "imap",
