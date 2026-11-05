@@ -295,6 +295,6 @@ node -e "const fs=require('fs');const h=fs.readFileSync('webui/index.html','utf8
 ## 👤 作者
 
 - **署名**：暗夜铭少 · **邮箱**：azgq@foxmail.com
-- 仓库：https://gitee.com/nights-shadow/fhq.git
+- 仓库：https://gitee.com/nights-shadow/gofw.git
 
 欢迎提交 Issue 和 Pull Request。

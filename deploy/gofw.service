@@ -1,6 +1,6 @@
 [Unit]
 Description=gofw 网络层防火墙 (真下发引擎)
-Documentation=https://gitee.com/nights-shadow/fhq
+Documentation=https://gitee.com/nights-shadow/gofw
 After=network-online.target
 Wants=network-online.target
 
