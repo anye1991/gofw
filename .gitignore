@@ -1,5 +1,7 @@
 # 二进制产物
 gofw
+gofw.linux
+*.linux
 *.exe
 *.exe~
 *.dll

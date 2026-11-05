@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>gofw 防火墙管理后台</title>
+<title>GoFW 防火墙管理后台</title>
+<link rel="icon" href="/favicon.ico">
 <style>
 :root{
   --bg:#0b1020; --panel:#121a2e; --panel2:#16213e; --line:#22304d;
@@ -22,7 +23,7 @@ button{font-family:inherit;cursor:pointer}
 .sidebar{width:212px;background:linear-gradient(180deg,#0d1426,#0b1020);border-right:1px solid var(--line);
   padding:20px 14px;display:flex;flex-direction:column;gap:6px;position:sticky;top:0;height:100vh}
 .brand{display:flex;align-items:center;gap:10px;padding:4px 8px 18px}
-.brand .logo{width:30px;height:30px;border-radius:8px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#04121f;font-weight:800;font-size:15px}
+.brand .logo{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#0c2238,#16324f);border:1px solid #1f4a6e;display:flex;align-items:center;justify-content:center}
 .brand b{font-size:15px;letter-spacing:.5px}
 .nav-btn{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid transparent;
   background:transparent;color:var(--muted);font-size:13.5px;text-align:left;width:100%;transition:.15s}
@@ -125,7 +126,7 @@ textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;l
 #login{position:fixed;inset:0;background:radial-gradient(circle at 50% 30%,#10203a,#070b16);display:none;align-items:center;justify-content:center;z-index:50}
 #login.show{display:flex}
 .login-card{width:340px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:30px 26px;text-align:center}
-.login-card .logo{width:46px;height:46px;border-radius:12px;background:var(--accent);color:#04121f;font-weight:800;font-size:22px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
+.login-card .logo{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,#0c2238,#16324f);border:1px solid #1f4a6e;display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
 .login-card h2{margin:0 0 4px;font-size:18px}
 .login-card p{color:var(--muted);font-size:12.5px;margin:0 0 20px}
 .login-card input{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:11px 13px;font-size:14px;margin-bottom:14px;outline:none}
@@ -141,8 +142,8 @@ textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;l
 <!-- 登录 -->
 <div id="login">
   <div class="login-card">
-    <div class="logo">g</div>
-    <h2>gofw 管理后台</h2>
+    <div class="logo"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2.5 L20 5.5 V11.5 C20 16.2 16.6 19.6 12 21 C7.4 19.6 4 16.2 4 11.5 V5.5 Z" fill="#0e2a44" stroke="#38bdf8" stroke-width="1.6"/><path d="M8.5 12 l2.4 2.4 L15.5 9" stroke="#34d399" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <h2>GoFW 防火墙</h2>
     <p>请输入访问密码以登录控制台</p>
     <input id="pw" type="password" placeholder="password" autocomplete="current-password">
     <button class="btn primary" style="width:100%" onclick="doLogin()">登 录</button>
@@ -152,15 +153,16 @@ textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;l
 
 <div id="app">
   <aside class="sidebar">
-    <div class="brand"><div class="logo">g</div><b>gofw</b></div>
+    <div class="brand"><div class="logo"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2.5 L20 5.5 V11.5 C20 16.2 16.6 19.6 12 21 C7.4 19.6 4 16.2 4 11.5 V5.5 Z" fill="#0e2a44" stroke="#38bdf8" stroke-width="1.6"/><path d="M8.5 12 l2.4 2.4 L15.5 9" stroke="#34d399" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div><b>GoFW防火墙</b></div>
     <button class="nav-btn active" data-sec="overview"><span class="ic">▣</span> 概览</button>
     <button class="nav-btn" data-sec="rules"><span class="ic">⚖</span> 规则管理</button>
     <button class="nav-btn" data-sec="ipgroups"><span class="ic">▤</span> 地址簿</button>
     <button class="nav-btn" data-sec="live"><span class="ic">⚡</span> 实时拦截</button>
     <button class="nav-btn" data-sec="conns"><span class="ic">⇄</span> 连接跟踪</button>
     <button class="nav-btn" data-sec="system"><span class="ic">◈</span> 能力中心</button>
+    <button class="nav-btn" data-sec="geofence"><span class="ic">🌐</span> 地理围栏</button>
     <button class="nav-btn" data-sec="config"><span class="ic">{}</span> 配置源</button>
-    <div class="side-foot">gofw firewall · v1</div>
+    <div class="side-foot">GoFW 防火墙 · v1.0.0</div>
   </aside>
 
   <div class="main">
@@ -249,7 +251,97 @@ textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;l
         <div class="panel">
           <h2>引擎能力中心</h2>
           <div class="sub">gofw 防火墙引擎内置的模块能力总览。状态实时反映当前运行实例。</div>
-          <div class="cap-grid" id="cap-grid"></div>
+          <div class="cap-grid" id="cap-grid">加载中…</div>
+          <div style="margin-top:26px">
+            <div class="sub" style="margin-bottom:12px">依据当前规则集实时推导的防护能力（数据来自引擎真实规则）</div>
+            <div class="cap-grid" id="cap-grid2">加载中…</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 地理围栏 -->
+      <section class="section" id="sec-geofence">
+        <div id="geo-backend-banner" style="margin-bottom:14px"></div>
+
+        <div class="panel" style="margin-bottom:14px">
+          <h2>GeoIP 库</h2>
+          <div class="sub">国家网段库（CIDR → 国家码）。支持两列标准格式，以及可选的城市 / ASN 扩展列。</div>
+          <div class="grid cards" id="geo-dbstats">
+            <div class="card stat"><div class="label">总条目</div><div class="val" id="geo-count">—</div></div>
+            <div class="card stat"><div class="label">国家 / 地区</div><div class="val" id="geo-countries">—</div></div>
+            <div class="card stat"><div class="label">IPv4 段</div><div class="val" id="geo-v4">—</div></div>
+            <div class="card stat"><div class="label">IPv6 段</div><div class="val" id="geo-v6">—</div></div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <span class="hint" id="geo-path" style="margin:0;flex:1"></span>
+            <button class="btn sm" onclick="geoReload()">重新加载库</button>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-bottom:14px">
+          <h2>一键地理围栏（选国家就行，不用记代码）</h2>
+          <div class="sub">按国家批量放行 / 拦截。所有预设都会强制前置防锁死护栏（管理端口、LAN 网段、loopback、已建立连接始终放行），护栏不可关闭。</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+            <div class="field" style="margin:0;flex:1;min-width:230px"><label>① 从下拉里选国家（中文名），点「加入」</label><select id="geo-pick"></select></div>
+            <button class="btn sm" onclick="geoAddPicked()">＋ 加入</button>
+            <div class="field" style="margin:0;flex:1;min-width:150px"><label>作用端口（留空 = 全部端口）</label><input id="geo-ports" placeholder="22,3389"></div>
+          </div>
+          <div class="hint" style="margin-bottom:10px">常用（点一下加 / 再点一下删）：
+            <button class="btn sm" onclick="geoToggle('CN')">中国 CN</button>
+            <button class="btn sm" onclick="geoToggle('US')">美国 US</button>
+            <button class="btn sm" onclick="geoToggle('RU')">俄罗斯 RU</button>
+            <button class="btn sm" onclick="geoToggle('JP')">日本 JP</button>
+            <button class="btn sm" onclick="geoToggle('KR')">韩国 KR</button>
+            <button class="btn sm" onclick="geoToggle('KP')">朝鲜 KP</button>
+            <button class="btn sm" onclick="geoToggle('GB')">英国 GB</button>
+            <button class="btn sm" onclick="geoToggle('DE')">德国 DE</button>
+            <button class="btn sm" onclick="geoToggle('IN')">印度 IN</button>
+            <button class="btn sm" onclick="geoToggle('BR')">巴西 BR</button>
+          </div>
+          <div class="field" style="margin-bottom:10px"><label>② 已选国家（可直接改代码，逗号分隔）</label><input id="geo-codes" placeholder="点上面「＋ 加入」，或直接填 RU,US" oninput="geoPreview()"></div>
+          <div id="geo-preview" class="hint" style="margin-bottom:10px;padding:9px 12px;border:1px solid rgba(255,255,255,.12);border-radius:8px">先选国家，这里会预演这次策略会影响到哪些真实流量</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <button class="btn primary" onclick="geoApply('blacklist')">③ 禁止这些国家访问（黑名单）</button>
+            <button class="btn" onclick="geoApply('whitelist')">③ 只允许这些国家访问（其它全断）</button>
+            <button class="btn" onclick="geoApply('ports')">只在指定端口上限制</button>
+            <button class="btn danger" onclick="geoClear()">清空，恢复原状</button>
+          </div>
+          <div class="sub" style="margin-bottom:10px">黑名单 = 只拦选中的国家，其它国家照常访问；白名单 = 只放选中的国家，其余全部拒绝。选白名单前先确认你自己的 IP 在下面护栏网段里。</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+            <div class="field" style="margin:0;flex:1;min-width:180px"><label>护栏：管理端口（自动放行，别删）</label><input id="geo-guard-ports" value="22,888,18706,18081"></div>
+            <div class="field" style="margin:0;flex:1;min-width:180px"><label>护栏：管理网段（自动放行，别删）</label><input id="geo-guard-lan" value="192.168.58.0/24"></div>
+          </div>
+          <div class="hint" id="geo-apply-hint"></div>
+        </div>
+
+        <div class="panel" style="margin-bottom:14px">
+          <h2>当前生效规则 <span id="geo-rule-count" style="color:var(--muted);font-size:13px;font-weight:400"></span></h2>
+          <div class="sub">带 <code>[gofw-guard]</code> 为护栏放行规则，<code>[gofw-geo]</code> 为地理封锁规则。清空只会移除这些标记规则，不影响手工规则。</div>
+          <div id="geo-rules"><div class="empty">加载中…</div></div>
+        </div>
+
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px">
+          <div class="panel">
+            <h2>来源国命中排行</h2>
+            <div class="sub">基于引擎实时决策统计（本次启动以来累计）。<code>??</code> 为库中无归属的地址（含内网）。</div>
+            <div id="geo-stats"><div class="empty">暂无数据</div></div>
+          </div>
+          <div class="panel">
+            <h2>临时自动封禁</h2>
+            <div class="sub">窗口内连续丢弃超阈值即临时封禁；内网 / 回环 / 管理网段默认豁免。</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+              <label class="checks" style="gap:6px"><input type="checkbox" id="ban-enabled"> 启用自动封禁</label>
+              <span class="hint" style="margin:0">阈值</span><input id="ban-threshold" type="number" min="1" value="20" style="width:62px;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:6px 8px">
+              <span class="hint" style="margin:0">窗口(s)</span><input id="ban-window" type="number" min="1" value="10" style="width:62px;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:6px 8px">
+              <span class="hint" style="margin:0">时长(s)</span><input id="ban-ttl" type="number" min="1" value="300" style="width:70px;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:6px 8px">
+              <button class="btn sm" onclick="banConfig()">保存配置</button>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:10px">
+              <input id="ban-ip" placeholder="手动封禁 IP" style="flex:1;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 10px">
+              <button class="btn sm" onclick="banAdd()">封禁</button>
+            </div>
+            <div id="ban-list"><div class="empty">暂无封禁</div></div>
+          </div>
         </div>
       </section>
 
@@ -283,7 +375,7 @@ function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');se
 function fmt(n){n=Number(n)||0;if(n>=1e9)return(n/1e9).toFixed(2)+'G';if(n>=1e6)return(n/1e6).toFixed(2)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'K';return ''+n;}
 function protoName(p){return ({1:'ICMP',6:'TCP',17:'UDP',58:'ICMPv6'})[p]||('P'+p);}
 function badge(a){const m={ACCEPT:'b-accept',DROP:'b-drop',REJECT:'b-reject',LOG:'b-log'};return `<span class="badge ${m[a]||'b-log'}">${a}</span>`;}
-function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function esc(s){ if(s===null||s===undefined) return ''; s = (typeof s==='object') ? JSON.stringify(s) : String(s); return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
 let RULES=[], IPGROUPS=[];
 
@@ -306,7 +398,8 @@ $('#pw') && document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&$('#log
 
 /* ---- 主循环 ---- */
 let last=null, seriesP=[], seriesD=[];
-function boot(){ setInterval(tick,2000); tick(); setInterval(liveTick,1000); liveTick(); setInterval(connTick,3000); connTick(); setInterval(sysTick,5000); sysTick(); }
+function boot(){ setInterval(tick,2000); tick(); setInterval(liveTick,1000); liveTick(); setInterval(connTick,3000); connTick(); setInterval(sysTick,5000); sysTick();
+  setInterval(()=>{ const el=$('#sec-geofence'); if(el&&el.classList.contains('active')) geoStats(); },5000); }
 async function tick(){
   const d=await jget('/api/stats');
   const e=d.engine;
@@ -559,28 +652,173 @@ async function connTick(){
 }
 
 /* ---- 能力中心 ---- */
+function sysErr(grid,msg){
+  const el=document.getElementById(grid);
+  if(el) el.innerHTML='<div class="cap" style="grid-column:1/-1"><h3 style="color:#ff8a8a">⚠ 渲染异常</h3><div class="desc">'+esc(msg)+'</div></div>';
+}
 async function sysTick(){
-  let d;
-  try{ d=await jget('/api/system'); }catch(e){ return; }
-  const geo=d.geoip||{}, dpi=d.dpi||{}, ct=d.conntrack||{}, eng=d.engine||{};
-  const caps=[
-    {name:'GeoIP 地理位置', desc:'按源 IP 国家做 allow/deny 匹配，需加载 IP 库', on:geo.loaded, onText:'已加载', offText:'未加载', extra:[['国家条目',fmt(geo.count)||0]]},
-    {name:'DPI 深度包检测', desc:'识别 HTTP/TLS/SSH/DNS 等应用层协议', on:dpi.enabled, onText:'已启用', offText:'未启用', chips:dpi.protocols||[]},
-    {name:'连接跟踪', desc:'TCP 状态机 + UDP/ICMP 连接表', on:true, onText:'运行中', offText:'停止', extra:[['总连接',ct.total||0],['已建立',ct.established||0],['TCP',ct.tcp||0],['UDP',ct.udp||0]]},
-    {name:'IP 分片重组', desc:'跨分片包重组后统一匹配', on:d.frag&&d.frag.enabled, onText:'已启用', offText:'未启用'},
-    {name:'引擎统计', desc:'实时包量 / 放行 / 拦截计数', on:true, onText:'运行中', offText:'停止', extra:[['总包',fmt(eng.packets)||0],['放行',fmt(eng.accepted)||0],['拦截',fmt(eng.dropped)||0],['流量',fmt(eng.bytes)||0]]}
-  ];
-  $('#cap-grid').innerHTML=caps.map(c=>{
-    const st=`<span class="status ${c.on?'on':'off'}">${c.on?c.onText:c.offText}</span>`;
-    let body='';
-    if(c.chips&&c.chips.length){ body='<div class="chips">'+c.chips.map(x=>`<span class="chip">${esc(x)}</span>`).join('')+'</div>'; }
-    else if(c.extra){ body=c.extra.map(([k,v])=>`<div class="kv"><span>${k}</span><b>${esc(v)}</b></div>`).join(''); }
-    return `<div class="cap"><h3>${esc(c.name)} ${st}</h3><div class="desc">${esc(c.desc)}</div>${body}</div>`;
-  }).join('');
+  // 模块能力 (来自 /api/system)
+  try{
+    const d=await jget('/api/system');
+    const geo=d.geoip||{}, dpi=d.dpi||{}, ct=d.conntrack||{}, eng=d.engine||{};
+    const caps=[
+      {name:'GeoIP 地理位置', desc:'按源 IP 国家做 allow/deny 匹配，需加载 IP 库', on:geo.loaded, onText:'已加载', offText:'未加载', extra:[['国家条目',fmt(geo.count)||0]]},
+      {name:'DPI 深度包检测', desc:'识别 HTTP/TLS/SSH/DNS 等应用层协议', on:dpi.enabled, onText:'已启用', offText:'未启用', chips:dpi.protocols||[]},
+      {name:'连接跟踪', desc:'TCP 状态机 + UDP/ICMP 连接表', on:true, onText:'运行中', offText:'停止', extra:[['总连接',ct.total||0],['已建立',ct.established||0],['TCP',ct.tcp||0],['UDP',ct.udp||0]]},
+      {name:'IP 分片重组', desc:'跨分片包重组后统一匹配', on:d.frag&&d.frag.enabled, onText:'已启用', offText:'未启用'},
+      {name:'引擎统计', desc:'实时包量 / 放行 / 拦截计数', on:true, onText:'运行中', offText:'停止', extra:[['总包',fmt(eng.packets)||0],['放行',fmt(eng.accepted)||0],['拦截',fmt(eng.dropped)||0],['流量',fmt(eng.bytes)||0]]}
+    ];
+    $('#cap-grid').innerHTML=caps.map(c=>{
+      const st=`<span class="status ${c.on?'on':'off'}">${c.on?c.onText:c.offText}</span>`;
+      let body='';
+      if(c.chips&&c.chips.length){ body='<div class="chips">'+c.chips.map(x=>`<span class="chip">${esc(x)}</span>`).join('')+'</div>'; }
+      else if(c.extra){ body=c.extra.map(([k,v])=>`<div class="kv"><span>${k}</span><b>${esc(v)}</b></div>`).join(''); }
+      return `<div class="cap"><h3>${esc(c.name)} ${st}</h3><div class="desc">${esc(c.desc)}</div>${body}</div>`;
+    }).join('');
+  }catch(e){ sysErr('cap-grid', 'system: '+(e&&e.message||e)); }
+
+  // 规则推导防护能力 (基于真实字段: action/comment/detail/name)
+  try{
+    const r=await jget('/api/rules');
+    const R=r.rules||[];
+    const txt=x=>[x.action,x.comment,x.detail,x.name].join(' ').toLowerCase();
+    const has=fn=>R.some(fn);
+    const syn=has(x=>/(conn_limit|连接限速|syn\s*flood|限连|限流)/i.test(txt(x)));
+    const amp=has(x=>/(bandwidth|带宽|放大|amplif)/i.test(txt(x)));
+    const anomaly=has(x=>/(xmas|fin[ -]?only|syn\+fin|syn\+rst|bogon|异常包|扫描拦截|tcp_flags)/i.test(txt(x)));
+    const geo=has(x=>/(geoip|地理|国家|allow.*us|allow.*ru)/i.test(txt(x)));
+    const ipv6=has(x=>/ipv6|\bv6\b/i.test(txt(x)));
+    const prot=[
+      {name:'SYN 洪水 / 连接限速', on:syn, detail: syn?'对 80/443/SSH 限连，抵御 SYN Flood':'未配置'},
+      {name:'ICMP / DNS 放大防护', on:amp, detail: amp?'ICMP 带宽限速、DNS UDP 限带宽':'未配置'},
+      {name:'异常包 / 扫描拦截', on:anomaly, detail: anomaly?'拦截 Xmas / FIN-only / SYN+FIN / bogon / IPv6 bogon':'未配置'},
+      {name:'GeoIP 地理围栏', on:geo, detail: geo?'按来源国家放行 / 拦截':'未配置'},
+      {name:'IPv6 防护', on:ipv6, detail: ipv6?'已启用 IPv6 源地址防护（回环/链路本地/组播拦截）':'未配置'},
+      {name:'规则引擎 (nftables)', on:R.length>0, detail:'当前 '+R.length+' 条规则实时生效'}
+    ];
+    $('#cap-grid2').innerHTML=prot.map(p=>`<div class="cap"><h3>${esc(p.name)} <span class="status ${p.on?'on':'off'}">${p.on?'已启用':'未启用'}</span></h3><div class="desc">${esc(p.detail)}</div></div>`).join('');
+  }catch(e){ sysErr('cap-grid2', 'rules: '+(e&&e.message||e)); }
 }
 
+/* ---- 地理围栏 ---- */
+let geoMode='monitor', geoCountryList=[], geoSrcStats=[];
+function geoName(code){
+  try{ const dn=new Intl.DisplayNames(['zh-CN'],{type:'region'}); const n=dn.of(code); return (n&&n!==code)?(n+' '+code):code; }
+  catch(e){ return code; }
+}
+function geoFillCountries(list){
+  geoCountryList=list||[];
+  const sel=$('#geo-pick'); if(!sel)return;
+  sel.innerHTML=geoCountryList.map(c=>`<option value="${esc(c.code)}">${esc(geoName(c.code))} · ${fmt(c.count||0)} 段</option>`).join('');
+}
+function geoCodes(){ return ($('#geo-codes').value||'').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean); }
+function geoSetCodes(a){ $('#geo-codes').value=a.join(','); geoPreview(); }
+function geoAddPicked(){ const c=$('#geo-pick').value; if(!c)return; const a=geoCodes(); if(!a.includes(c))a.push(c); geoSetCodes(a); }
+function geoToggle(c){ const a=geoCodes(); const i=a.indexOf(c); if(i>=0)a.splice(i,1); else a.push(c); geoSetCodes(a); }
+function geoPreview(){
+  const el=$('#geo-preview'); if(!el)return;
+  const codes=geoCodes();
+  if(!codes.length){ el.textContent='先选国家，这里会预演这次策略会影响到哪些真实流量'; return; }
+  const inList=x=>codes.includes(String(x.country||'').toUpperCase());
+  const hit=geoSrcStats.filter(inList), other=geoSrcStats.filter(x=>!inList(x));
+  const sum=a=>a.reduce((s,x)=>s+(x.packets||0),0);
+  const hp=sum(hit), op=sum(other);
+  el.innerHTML='<b>预演：</b>选中 <span class="mono">'+esc(codes.join(', '))+'</span>（'+esc(codes.map(geoName).join('、'))+'）。本次启动以来，来自这些国家的真实流量 <b>'+fmt(hp)+'</b> 个包，其它来源 <b>'+fmt(op)+'</b> 个包。'+
+    '<br>点「禁止这些国家访问」→ 拦前者；点「只允许这些国家访问」→ 拦后者。'+
+    (geoMode==='monitor'?'<br><b style="color:var(--amber)">当前是监控预演，只统计不真丢包</b>；确认没锁住自己之后，再切到内核模式才会真正断网。':'<br><b style="color:var(--green)">当前是内核模式，规则会真实丢弃数据包</b>。');
+}
+function geoHint(msg,ok){ const el=$('#geo-apply-hint'); if(!el)return; el.textContent=msg||''; el.style.color=ok===false?'var(--red)':(ok===true?'var(--green)':'var(--dim)'); }
+function geoBackendBanner(mode){
+  const el=$('#geo-backend-banner'); if(!el)return;
+  if(mode==='kernel'){
+    el.innerHTML='<div class="panel" style="border-color:rgba(52,211,153,.4);padding:12px 16px"><b style="color:var(--green)">内核生效模式（nftables）</b>　规则已下发内核，会真实丢弃数据包。地理围栏封锁会实际生效。</div>';
+  }else{
+    el.innerHTML='<div class="panel" style="border-color:rgba(251,191,36,.45);padding:12px 16px"><b style="color:var(--amber)">旁路监控模式（monitor）＝ 先试跑，不误伤</b>　当前只记录决策 / 统计 / 日志，<b>不会真实丢包</b>。规则照常配置、预演照常算，但流量照常通过。<br>用法：下面 ① 选国家 → 看「预演」确认影响 → ③ 点黑名单 / 白名单生成规则 → 核对规则列表里护栏排在最前 → 最后去掉启动参数 <code>--monitor</code> 切到 nftables 内核后端，这一步才会真正断网（切换前务必确认护栏已放行管理通道与内网）。</div>';
+  }
+}
+async function geoStatus(){
+  try{
+    const d=await jget('/api/geofence');
+    const db=d.db||{};
+    $('#geo-count').textContent=fmt(db.count||0);
+    $('#geo-countries').textContent=(db.countries||[]).length||0;
+    $('#geo-v4').textContent=fmt(db.v4||0);
+    $('#geo-v6').textContent=fmt(db.v6||0);
+    $('#geo-path').textContent='库文件：'+(db.path||'内置库')+'　来源：'+(db.source==='external'?'外部 CSV':'内置')+'　加载：'+(db.loaded?'是':'否');
+    geoMode=d.mode||'monitor';
+    geoFillCountries(db.countries||[]);
+    geoBackendBanner(geoMode);
+    geoPreview();
+    const all=(d.guards||[]).concat(d.fences||[]);
+    $('#geo-rule-count').textContent='· 共 '+all.length+' 条';
+    $('#geo-rules').innerHTML=all.length?('<table><thead><tr><th>#</th><th>动作</th><th>说明</th></tr></thead><tbody>'+
+      all.map(r=>`<tr><td style="color:var(--muted)">${esc(r.index)}</td><td>${badge(r.action)}</td><td class="mono" style="word-break:break-all">${esc(r.comment)}</td></tr>`).join('')+'</tbody></table>'):'<div class="empty">当前未启用地理围栏</div>';
+  }catch(e){ $('#geo-rules').innerHTML='<div class="empty" style="color:var(--red)">状态加载失败: '+esc(e&&e.message||e)+'</div>'; }
+}
+async function geoStats(){
+  try{
+    const d=await jget('/api/geoip/stats');
+    const st=d.stats||[];
+    geoSrcStats=st; geoPreview();
+    const max=Math.max(1,...st.map(x=>x.packets||0));
+    $('#geo-stats').innerHTML=st.length?st.slice(0,12).map(x=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:7px">
+      <span class="mono" style="width:34px;color:var(--accent)">${esc(x.country)}</span>
+      <div class="bar" style="flex:1"><i style="width:${(100*(x.packets||0)/max).toFixed(0)}%;background:${(x.dropped||0)>0?'var(--red)':'var(--accent)'}"></i></div>
+      <span class="mono" style="width:120px;text-align:right">${fmt(x.packets)} / <span style="color:var(--red)">${fmt(x.dropped)}</span></span></div>`).join('')+
+      '<div class="hint">左：包量　右红：被丢弃　（每 5 秒刷新）</div>':'<div class="empty">暂无数据</div>';
+    const bans=d.bans||[];
+    $('#ban-list').innerHTML=bans.length?('<table><thead><tr><th>IP</th><th>来源</th><th>到期</th><th></th></tr></thead><tbody>'+
+      bans.map(b=>`<tr><td class="mono">${esc(b.ip)}</td><td>${esc(b.country||'??')} · ${esc(b.reason)}</td><td class="mono">${b.until?new Date(b.until*1000).toLocaleTimeString():'永久'}</td><td><button class="btn sm danger" onclick="banRemove('${encodeURIComponent(b.ip)}')">解封</button></td></tr>`).join('')+'</tbody></table>'):'<div class="empty">暂无封禁</div>';
+    if(d.config){ $('#ban-enabled').checked=!!d.config.enabled; $('#ban-threshold').value=d.config.threshold; $('#ban-window').value=d.config.window_sec; $('#ban-ttl').value=d.config.ban_sec; }
+  }catch(e){ /* 统计接口降级不阻断页面 */ }
+}
+async function geoApply(preset){
+  const codes=$('#geo-codes').value.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean);
+  const ports=$('#geo-ports').value.trim();
+  if(!codes.length){ geoHint('请填写至少一个两位国家码',false); return; }
+  geoHint('应用中…');
+  try{
+    const r=await api('POST','/api/geofence/apply',{preset,countries:codes,ports,
+      guard:{mgmt_ports:$('#geo-guard-ports').value.trim(),lan_cidr:$('#geo-guard-lan').value.trim()}});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ geoHint(j.error||'应用失败',false); return; }
+    geoHint('已应用：'+j.preset+'，共 '+j.rules+' 条规则，护栏 '+j.guards+' 条已强制前置'+(geoMode==='monitor'?'；当前仍是监控预演，未真实丢包':'；内核模式已真实生效'),true);
+    await geoStatus(); await geoStats();
+  }catch(e){ geoHint('应用异常: '+(e&&e.message||e),false); }
+}
+async function geoClear(){
+  if(!confirm('清空所有地理围栏规则（含护栏），恢复原规则集？'))return;
+  try{ const r=await api('POST','/api/geofence/clear',{}); const j=await r.json().catch(()=>({}));
+    if(r.ok){ geoHint('已清空，当前 '+j.rules+' 条规则',true); await geoStatus(); } else geoHint(j.error||'清空失败',false);
+  }catch(e){ geoHint('清空异常: '+(e&&e.message||e),false); }
+}
+async function geoReload(){
+  try{ const r=await api('POST','/api/geoip/reload',{}); const j=await r.json().catch(()=>({}));
+    toast(r.ok?('库已重新加载：'+fmt(j.count)+' 条'):(j.error||'重载失败'));
+    if(r.ok) await geoStatus();
+  }catch(e){ toast('重载异常: '+(e&&e.message||e)); }
+}
+async function banConfig(){
+  try{ const r=await api('POST','/api/bans',{action:'config',config:{enabled:$('#ban-enabled').checked,
+    threshold:+$('#ban-threshold').value,window_sec:+$('#ban-window').value,ban_sec:+$('#ban-ttl').value}});
+    toast(r.ok?'自动封禁配置已保存':'配置失败'); await geoStats();
+  }catch(e){ toast('配置异常: '+(e&&e.message||e)); }
+}
+async function banAdd(){
+  const ip=$('#ban-ip').value.trim(); if(!ip){ toast('请填写 IP'); return; }
+  try{ const r=await api('POST','/api/bans',{action:'add',ip,ttl:+$('#ban-ttl').value||300}); const j=await r.json().catch(()=>({}));
+    toast(r.ok?'已封禁 '+ip:(j.error||'封禁失败')); $('#ban-ip').value=''; await geoStats();
+  }catch(e){ toast('封禁异常: '+(e&&e.message||e)); }
+}
+async function banRemove(ipEnc){
+  const ip=decodeURIComponent(ipEnc);
+  try{ const r=await api('POST','/api/bans',{action:'unban',ip}); toast(r.ok?'已解封 '+ip:'解封失败'); await geoStats(); }
+  catch(e){ toast('解封异常: '+(e&&e.message||e)); }
+}
+function geoTick(){ geoStatus(); geoStats(); }
+
 /* ---- 导航 ---- */
-const titles={overview:'概览',rules:'规则管理',ipgroups:'地址簿',live:'实时拦截',conns:'连接跟踪',system:'能力中心',config:'配置源'};
+const titles={overview:'概览',rules:'规则管理',ipgroups:'地址簿',live:'实时拦截',conns:'连接跟踪',system:'能力中心',geofence:'地理围栏',config:'配置源'};
 document.querySelectorAll('.nav-btn').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
@@ -592,6 +830,7 @@ document.querySelectorAll('.nav-btn').forEach(b=>b.onclick=()=>{
   if(s==='ipgroups')loadIPGroups();
   if(s==='config')loadConfig();
   if(s==='system')sysTick();
+  if(s==='geofence')geoTick();
 });
 checkAuth();
 </script>

@@ -17,11 +17,15 @@ import (
 
 	"gofw/config"
 	"gofw/engine"
+	"gofw/geoctl"
 	"gofw/rules"
 )
 
 //go:embed index.html
 var dashboardHTML string
+
+//go:embed favicon.ico
+var faviconData []byte
 
 const sessionTTL = 24 * time.Hour
 
@@ -37,6 +41,13 @@ type Server struct {
 	password string             // 非空时启用登录鉴权（来自环境变量 GOFW_WEB_PASSWORD）
 	sessions map[string]int64   // sid -> 过期时间戳
 	sessMu   sync.Mutex
+
+	// 地理围栏扩展（通过 SetGeo 注入，均为可选；nil 时相关 API 返回降级信息）
+	geoCtl    *geoctl.Tracker
+	reloadGeo func() (int, error) // 重新加载 GeoIP CSV，返回条目数
+	geoPath   string              // GeoIP 库文件路径（展示用）
+	geoSource string              // 库来源 "external" / "builtin"
+	backend   string              // 执行后端 "kernel"(nftables 真实丢包) / "monitor"(旁路记录)
 }
 
 // New 创建 Web 管理服务器。
@@ -56,6 +67,16 @@ func New(engPtr *atomic.Pointer[engine.Engine], rsPtr *atomic.Pointer[rules.Rule
 	return s
 }
 
+// SetGeo 注入地理围栏扩展依赖（由 main.go 装配，可选）。
+// source 为库来源（external/builtin），backend 为执行后端（kernel/monitor）。
+func (s *Server) SetGeo(ctl *geoctl.Tracker, reload func() (int, error), path, source, backend string) {
+	s.geoCtl = ctl
+	s.reloadGeo = reload
+	s.geoPath = path
+	s.geoSource = source
+	s.backend = backend
+}
+
 // Start 启动 HTTP 服务器。
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
@@ -71,6 +92,15 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/system", s.auth(s.handleSystem))
 	mux.HandleFunc("/api/ipgroups", s.auth(s.handleIPGroups))
 	mux.HandleFunc("/api/ipgroups/", s.auth(s.handleIPGroups))
+	// 地理围栏扩展 API
+	mux.HandleFunc("/api/geofence", s.auth(s.handleGeofence))
+	mux.HandleFunc("/api/geofence/", s.auth(s.handleGeofence))
+	mux.HandleFunc("/api/geoip/countries", s.auth(s.handleGeoCountries))
+	mux.HandleFunc("/api/geoip/stats", s.auth(s.handleGeoStats))
+	mux.HandleFunc("/api/geoip/reload", s.auth(s.handleGeoReload))
+	mux.HandleFunc("/api/bans", s.auth(s.handleBans))
+	mux.HandleFunc("/api/bans/", s.auth(s.handleBans))
+	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 	mux.HandleFunc("/", s.auth(s.handleIndex))
 
 	srv := &http.Server{
@@ -87,6 +117,13 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	io.WriteString(w, dashboardHTML)
+}
+
+// handleFavicon 返回内嵌的盾牌图标（编译进二进制，无需外部文件）。
+func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/x-icon")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Write(faviconData)
 }
 
 // auth 中间件：未设置密码时放行；设置密码时，仅对 /api/* 校验会话 cookie，

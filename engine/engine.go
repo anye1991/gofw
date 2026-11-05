@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gofw/dpi"
+	"gofw/geoctl"
 	"gofw/geoip"
 	"gofw/packet"
 	"gofw/rules"
@@ -461,6 +462,7 @@ type Engine struct {
 	Frag      *FragReassembler
 	GeoIP     *geoip.DB
 	DPI       *dpi.Detector
+	GeoCtl    *geoctl.Tracker // 地理围栏统计 / 临时封禁（可为 nil）
 	packets   uint64
 	accepted  uint64
 	dropped   uint64
@@ -539,6 +541,11 @@ func (e *Engine) SetGeoIP(db *geoip.DB) {
 	}
 }
 
+// SetGeoCtl 注入地理围栏统计 / 临时封禁跟踪器。
+func (e *Engine) SetGeoCtl(t *geoctl.Tracker) {
+	e.GeoCtl = t
+}
+
 // SetRuleset 热替换规则集，保留连接跟踪表和分片重组器（持久连接跟踪）。
 func (e *Engine) SetRuleset(rs *rules.RuleSet) {
 	e.Ruleset = rs
@@ -548,6 +555,19 @@ func (e *Engine) SetRuleset(rs *rules.RuleSet) {
 func (e *Engine) Decide(p *packet.Packet) Decision {
 	atomic.AddUint64(&e.packets, 1)
 	atomic.AddUint64(&e.bytes, uint64(len(p.Raw)))
+
+	// 临时封禁：命中即在规则匹配前直接丢弃（优先级最高）。
+	// 该检查独立于执行后端，monitor / nftables 两种模式都生效于决策层。
+	if e.GeoCtl != nil && e.GeoCtl.IsBanned(p.SrcIP) {
+		country := ""
+		if e.GeoIP != nil && e.GeoIP.Loaded() {
+			country = e.GeoIP.Lookup(p.SrcIP)
+		}
+		e.GeoCtl.ObserveBanned(country)
+		atomic.AddUint64(&e.dropped, 1)
+		e.publish(rules.ActionDrop, nil, p, country)
+		return Decision{Action: rules.ActionDrop, ConnState: CTNew, Packet: p}
+	}
 
 	// 分片重组
 	if p.IsFragment {
@@ -582,6 +602,11 @@ func (e *Engine) Decide(p *packet.Packet) Decision {
 		TCPFlags: p.TCPFlags, VLAN: p.VLAN, ConnState: connState,
 		Now: time.Now(), PacketLen: len(p.Raw),
 		SrcCountry: srcCountry, AppProto: appProto,
+		// 抓包为混杂模式，用户态无法可靠区分入/出站；显式设为 any，
+		// 使带 direction 的规则仍参与用户态决策（精确的方向过滤由内核
+		// nftables 按 input/output/forward 链完成）。否则 c.Direction 为空串，
+		// 会被 Rule.Match 误判为方向不符而跳过全部 direction:in/out 规则。
+		Direction: rules.DirAny,
 	}
 	rule, action := e.Ruleset.Match(ctx)
 
@@ -593,6 +618,11 @@ func (e *Engine) Decide(p *packet.Packet) Decision {
 		atomic.AddUint64(&e.accepted, 1)
 	} else {
 		atomic.AddUint64(&e.dropped, 1)
+	}
+
+	if e.GeoCtl != nil {
+		drop := action != rules.ActionAccept && action != rules.ActionLog
+		e.GeoCtl.Observe(p.SrcIP, srcCountry, action, drop)
 	}
 
 	e.publish(action, rule, p, srcCountry)
