@@ -4,7 +4,9 @@ package geoip
 
 import (
 	"encoding/csv"
+	"io"
 	"net"
+	"net/netip"
 	"os"
 	"sort"
 	"strings"
@@ -17,16 +19,41 @@ type entry struct {
 	country string
 }
 
+// prefixEntry 是查询索引里的条目：只存掩码后的网络地址，避免每次比较
+// 都走 net.IPNet.Contains（后者要处理切片、掩码计算，热路径开销明显）。
+type prefixEntry struct {
+	addr    netip.Addr
+	country string
+	bits    int // 前缀长度，仅在需要查 meta 时用于重建 CIDR key
+}
+
+// familyIndex 单个地址族的索引：按前缀长度分组，组内按网络地址升序，
+// 查询时从最长前缀往最短走、每组二分，复杂度 O(前缀数 * log N)。
+type familyIndex struct {
+	byBits map[int][]prefixEntry
+	bits   []int // 已存在的前缀长度，降序（更具体的网段优先）
+}
+
 // DB 地理位置数据库。
 type DB struct {
 	mu      sync.RWMutex
 	entries []entry
+	meta    map[string]GeoMeta // key 为 CIDR 字符串，存放可选的城市/ASN 列
 	loaded  bool
+	v4idx   *familyIndex
+	v6idx   *familyIndex
+
+	// 加载时预计算的汇总，避免后台每次刷新都全表扫描百万级条目。
+	statTotal   int
+	statV4      int
+	statV6      int
+	statCodes   []string
+	countryList []map[string]interface{}
 }
 
 // New 创建空数据库。
 func New() *DB {
-	return &DB{}
+	return &DB{meta: make(map[string]GeoMeta)}
 }
 
 // NewWithBuiltin 创建数据库并加载内置国家库。
@@ -43,73 +70,223 @@ func (db *DB) LoadBuiltin() {
 	db.loadRecords(builtinData)
 }
 
-// loadRecords 从 "CIDR,country" 字符串切片加载数据。
-func (db *DB) loadRecords(records []string) {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	db.entries = nil
-	for _, rec := range records {
-		comma := strings.IndexByte(rec, ',')
-		if comma < 0 {
-			continue
-		}
-		cidr := strings.TrimSpace(rec[:comma])
-		country := strings.ToUpper(strings.TrimSpace(rec[comma+1:]))
-		if cidr == "" || country == "" {
-			continue
-		}
-		_, ipnet, err := net.ParseCIDR(cidr)
-		if err != nil {
-			continue
-		}
-		db.entries = append(db.entries, entry{network: ipnet, country: country})
+// parseRecord 把一行 CSV 字段解析成条目与可选元数据。
+// 返回 ok=false 表示该行无效（表头、空行、字段不足、非法 CIDR），应跳过。
+func parseRecord(rec []string) (entry, GeoMeta, bool) {
+	if len(rec) < 2 {
+		return entry{}, GeoMeta{}, false
 	}
-	// 按 CIDR 前缀长度降序排列，使更具体的网段优先匹配。
-	// 使用稳定排序保证相同前缀长度的条目保持原始顺序，结果确定可预期。
-	sort.SliceStable(db.entries, func(i, j int) bool {
-		onesI, _ := db.entries[i].network.Mask.Size()
-		onesJ, _ := db.entries[j].network.Mask.Size()
-		return onesI > onesJ
-	})
-	db.loaded = len(db.entries) > 0
+	cidr := strings.TrimSpace(rec[0])
+	country := strings.ToUpper(strings.TrimSpace(rec[1]))
+	if cidr == "" || country == "" {
+		return entry{}, GeoMeta{}, false
+	}
+	_, ipnet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return entry{}, GeoMeta{}, false
+	}
+	e := entry{network: ipnet, country: country}
+	var m GeoMeta
+	if len(rec) >= 3 {
+		m.City = strings.TrimSpace(rec[2])
+		if len(rec) >= 4 {
+			m.ASN = strings.TrimSpace(rec[3])
+		}
+	}
+	return e, m, true
 }
 
-// LoadFromCSV 从 CSV 文件加载。格式: CIDR,country_code（可含表头）。
+// commitLocked 用一批解析好的数据整体替换当前快照并重建索引。
+// 调用方须持有写锁；解析在锁外完成，读写锁只保护最后的原子切换。
+func (db *DB) commitLocked(entries []entry, meta map[string]GeoMeta) {
+	// 按 CIDR 前缀长度降序排列，使更具体的网段优先匹配。
+	// 使用稳定排序保证相同前缀长度的条目保持原始顺序，结果确定可预期。
+	sort.SliceStable(entries, func(i, j int) bool {
+		onesI, _ := entries[i].network.Mask.Size()
+		onesJ, _ := entries[j].network.Mask.Size()
+		return onesI > onesJ
+	})
+	db.entries = entries
+	db.meta = meta
+	db.loaded = len(entries) > 0
+	db.v4idx, db.v6idx = buildIndexes(entries)
+	db.precomputeStats(entries)
+}
+
+// precomputeStats 在加载/热重载时一次性算好汇总。调用方须持有写锁。
+func (db *DB) precomputeStats(entries []entry) {
+	counts := make(map[string]int)
+	codes := make(map[string]bool)
+	db.statTotal, db.statV4, db.statV6 = len(entries), 0, 0
+	for _, e := range entries {
+		if e.network.IP.To4() == nil {
+			db.statV6++
+		} else {
+			db.statV4++
+		}
+		counts[e.country]++
+		codes[e.country] = true
+	}
+	db.statCodes = make([]string, 0, len(codes))
+	for c := range codes {
+		db.statCodes = append(db.statCodes, c)
+	}
+	sort.Strings(db.statCodes)
+	db.countryList = make([]map[string]interface{}, 0, len(db.statCodes))
+	for _, c := range db.statCodes {
+		db.countryList = append(db.countryList, map[string]interface{}{"code": c, "count": counts[c]})
+	}
+}
+
+// loadRecords 从 "CIDR,country" 字符串切片加载数据（内置库用）。
+func (db *DB) loadRecords(records []string) {
+	entries := make([]entry, 0, len(records))
+	meta := make(map[string]GeoMeta)
+	for _, rec := range records {
+		e, m, ok := parseRecord(strings.Split(rec, ","))
+		if !ok {
+			continue
+		}
+		entries = append(entries, e)
+		if m.City != "" || m.ASN != "" {
+			meta[e.network.String()] = m
+		}
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	db.commitLocked(entries, meta)
+}
+
+// loadFromCSVStream 流式解析 CSV，解析完成后一次性替换快照。
+// 相比 csv.ReadAll，避免为百万级行生成 [][]string 与拼接后的 []string，
+// 峰值内存可下降一半以上，这对低配机器加载完整 IPv4+IPv6 库很关键。
+func (db *DB) loadFromCSVStream(f io.Reader) error {
+	r := csv.NewReader(f)
+	r.FieldsPerRecord = -1 // 允许 2~4 列混用
+	entries := make([]entry, 0, 1<<20)
+	meta := make(map[string]GeoMeta)
+	for {
+		rec, err := r.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		e, m, ok := parseRecord(rec)
+		if !ok {
+			continue
+		}
+		entries = append(entries, e)
+		if m.City != "" || m.ASN != "" {
+			meta[e.network.String()] = m
+		}
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	db.commitLocked(entries, meta)
+	return nil
+}
+
+// buildIndexes 为所有条目建立按地址族 + 前缀长度分组的有序索引。
+// 调用方须持有写锁（loadRecords 内），构建期间读锁会阻塞，保证快照一致。
+func buildIndexes(entries []entry) (*familyIndex, *familyIndex) {
+	v4 := &familyIndex{byBits: make(map[int][]prefixEntry)}
+	v6 := &familyIndex{byBits: make(map[int][]prefixEntry)}
+	for _, e := range entries {
+		ones, _ := e.network.Mask.Size()
+		if ones < 0 {
+			continue
+		}
+		addr, ok := netip.AddrFromSlice(e.network.IP)
+		if !ok {
+			continue
+		}
+		addr = addr.Unmap()
+		pe := prefixEntry{addr: addr, country: e.country, bits: ones}
+		dst := v6
+		if addr.Is4() {
+			dst = v4
+		}
+		dst.byBits[ones] = append(dst.byBits[ones], pe)
+	}
+	for _, idx := range []*familyIndex{v4, v6} {
+		for b, arr := range idx.byBits {
+			sort.Slice(arr, func(i, j int) bool { return arr[i].addr.Compare(arr[j].addr) < 0 })
+			idx.byBits[b] = arr
+			idx.bits = append(idx.bits, b)
+		}
+		sort.Sort(sort.Reverse(sort.IntSlice(idx.bits)))
+	}
+	return v4, v6
+}
+
+// LoadFromCSV 从 CSV 文件加载。格式: CIDR,country_code[,city,asn]（可含表头）。
 func (db *DB) LoadFromCSV(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	reader := csv.NewReader(f)
-	records, err := reader.ReadAll()
+	return db.loadFromCSVStream(f)
+}
+
+// Reload 原子地重新加载 CSV 文件。加载失败时保留原有数据不变，
+// 供 --geoip-reload-interval 定时热更新与 /api/geoip/reload 手动触发使用。
+func (db *DB) Reload(path string) (int, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	var lines []string
-	for _, rec := range records {
-		if len(rec) < 2 {
-			continue
-		}
-		lines = append(lines, rec[0]+","+rec[1])
+	defer f.Close()
+	if err := db.loadFromCSVStream(f); err != nil {
+		return 0, err
 	}
-	db.loadRecords(lines)
-	return nil
+	return db.Count(), nil
 }
 
 // Lookup 查询 IP 对应的国家码。未匹配返回空字符串。
+// 走索引：按地址族选表，再从最长前缀到最短逐组二分。
 func (db *DB) Lookup(ip net.IP) string {
 	if ip == nil {
 		return ""
 	}
 	db.mu.RLock()
 	defer db.mu.RUnlock()
-	for _, e := range db.entries {
-		if e.network.Contains(ip) {
-			return e.country
-		}
+	if pe := db.lookupEntry(ip); pe != nil {
+		return pe.country
 	}
 	return ""
+}
+
+// lookupEntry 返回最具体匹配的索引条目。调用方必须已持有 RLock。
+func (db *DB) lookupEntry(ip net.IP) *prefixEntry {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return nil
+	}
+	addr = addr.Unmap()
+	idx := db.v6idx
+	if addr.Is4() {
+		idx = db.v4idx
+	}
+	if idx == nil {
+		return nil
+	}
+	for _, bits := range idx.bits {
+		p, err := addr.Prefix(bits)
+		if err != nil {
+			continue
+		}
+		arr := idx.byBits[bits]
+		lo := sort.Search(len(arr), func(i int) bool {
+			return arr[i].addr.Compare(p.Addr()) >= 0
+		})
+		if lo < len(arr) && arr[lo].addr.Compare(p.Addr()) == 0 {
+			return &arr[lo]
+		}
+	}
+	return nil
 }
 
 // Loaded 返回数据库是否已加载。

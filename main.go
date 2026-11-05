@@ -32,6 +32,7 @@ import (
 	"gofw/config"
 	"gofw/enforce"
 	"gofw/engine"
+	"gofw/geoctl"
 	"gofw/geoip"
 	"gofw/ha"
 	"gofw/packet"
@@ -99,6 +100,12 @@ func cmdStart(args []string) int {
 	webAddr := fs.string("", "web", "")       // Web 管理界面监听地址
 	haConfig := fs.string("", "ha", "")       // HA 配置文件
 	alertConfig := fs.string("", "alert", "") // 告警配置文件
+	geoReloadInterval := fs.float("", "geoip-reload-interval", 0) // GeoIP 库热更新检查间隔（秒，0=关闭）
+	autoBanEnabled := fs.bool("", "auto-ban", false)               // 临时自动封禁总开关
+	banThreshold := fs.int("", "ban-threshold", 20)                // 窗口内 DROP 次数阈值
+	banWindow := fs.int("", "ban-window", 10)                      // 统计窗口（秒）
+	banTTL := fs.int("", "ban-ttl", 300)                           // 封禁时长（秒）
+	banSafeCIDR := fs.string("", "ban-safe-cidr", "")              // 额外永不封禁网段（逗号分隔）
 
 	if rulesFile == "" {
 		fmt.Fprintln(os.Stderr, "error: -r rules.yaml is required")
@@ -131,6 +138,7 @@ func cmdStart(args []string) int {
 
 	// GeoIP 数据库加载（优先外部 CSV，否则使用内置国家库）
 	geoPath := rulesFile + ".geoip"
+	geoSource := "builtin"
 	var geoDB *geoip.DB
 	if _, err := os.Stat(geoPath); err == nil {
 		db := geoip.New()
@@ -138,15 +146,38 @@ func cmdStart(args []string) int {
 			log.Printf("warning: geoip load failed: %v", err)
 		} else {
 			geoDB = db
+			geoSource = "external"
 			eng.SetGeoIP(db)
 			log.Printf("geoip loaded from %s: %d entries", geoPath, db.Count())
 		}
-	} else {
-		// 无外部 CSV，加载内置国家库
+	}
+	if geoDB == nil {
+		// 无外部 CSV 或加载失败，回退内置国家库
 		geoDB = geoip.NewWithBuiltin()
 		eng.SetGeoIP(geoDB)
 		log.Printf("geoip builtin loaded: %d entries", geoDB.Count())
 	}
+
+	// 地理围栏运行时：来源国统计 + 临时自动封禁
+	tracker := geoctl.New()
+	tracker.SetConfig(geoctl.Config{
+		Enabled: autoBanEnabled, Threshold: banThreshold,
+		WindowSec: banWindow, BanSec: banTTL,
+	})
+	if banSafeCIDR != "" {
+		for _, c := range strings.Split(banSafeCIDR, ",") {
+			c = strings.TrimSpace(c)
+			if c == "" {
+				continue
+			}
+			if err := tracker.AddSafeCIDR(c); err != nil {
+				log.Printf("warning: invalid --ban-safe-cidr %q: %v", c, err)
+			}
+		}
+	}
+	eng.SetGeoCtl(tracker)
+	log.Printf("geoctl: auto-ban=%v threshold=%d window=%ds ttl=%ds",
+		autoBanEnabled, banThreshold, banWindow, banTTL)
 
 	// 告警管理器
 	var alertMgr *alert.Manager
@@ -178,8 +209,18 @@ func cmdStart(args []string) int {
 	}
 
 	enf := enforce.BuildEnforcer(!monitor)
-	if g, ok := enf.(*enforce.NftablesEnforcer); ok && geoDB != nil {
-		g.SetGeoIP(geoDB)
+	isKernel := false
+	if g, ok := enf.(*enforce.NftablesEnforcer); ok {
+		isKernel = true
+		if geoDB != nil {
+			g.SetGeoIP(geoDB)
+		}
+		// 动态封禁随规则热替换一起下发内核
+		g.SetBanProvider(tracker.ActiveBansSplit)
+	}
+	backend := "monitor"
+	if isKernel {
+		backend = "kernel"
 	}
 	if !enf.Apply(rs) {
 		log.Printf("failed to apply ruleset to enforcer")
@@ -250,21 +291,99 @@ func cmdStart(args []string) int {
 	ctlStop := make(chan struct{})
 	go serveControl(ctlSock, &engPtr, &rsPtr, rulesFile, enf, ctlStop)
 
+	// 规则热应用统一入口：所有路径（Web 编辑 / 库热更新 / 封禁变化）共用同一把锁，
+	// 避免 nftables 的 delete+replace 原子替换被并发调用交错破坏。
+	var applyMu sync.Mutex
+	applyRuleset := func(newRS *rules.RuleSet) {
+		applyMu.Lock()
+		defer applyMu.Unlock()
+		engPtr.Load().SetRuleset(newRS)
+		rsPtr.Store(newRS)
+		enf.Apply(newRS)
+	}
+	reapplyCurrent := func() {
+		applyMu.Lock()
+		defer applyMu.Unlock()
+		enf.Apply(rsPtr.Load())
+	}
+
+	// GeoIP 库热加载：原地原子替换数据后重新下发（geoip 集合是编译进内核的）
+	reloadGeo := func() (int, error) {
+		if geoSource != "external" {
+			return 0, fmt.Errorf("当前使用内置库，无可热加载的外部 CSV")
+		}
+		n, err := geoDB.Reload(geoPath)
+		if err != nil {
+			return 0, err
+		}
+		log.Printf("geoip reloaded from %s: %d entries", geoPath, n)
+		reapplyCurrent()
+		return n, nil
+	}
+
 	// Web 管理界面
 	if webAddr != "" {
 		go func() {
-			applyFn := func(newRS *rules.RuleSet) {
-				engPtr.Load().SetRuleset(newRS)
-				rsPtr.Store(newRS)
-				enf.Apply(newRS)
-			}
-			srv := webui.New(&engPtr, &rsPtr, webAddr, rulesFile, applyFn)
-			log.Printf("web UI listening on %s", webAddr)
+			srv := webui.New(&engPtr, &rsPtr, webAddr, rulesFile, applyRuleset)
+			srv.SetGeo(tracker, reloadGeo, geoPath, geoSource, backend)
+			log.Printf("web UI listening on %s (backend=%s, geoip=%s)", webAddr, backend, geoSource)
 			if err := srv.Start(); err != nil {
 				log.Printf("web UI error: %v", err)
 			}
 		}()
 	}
+
+	// GeoIP 库文件变化自动热更新（mtime 检测，间隔由 --geoip-reload-interval 控制）
+	if geoReloadInterval > 0 && geoSource == "external" {
+		go func() {
+			var lastMod time.Time
+			if st, err := os.Stat(geoPath); err == nil {
+				lastMod = st.ModTime()
+			}
+			tick := time.NewTicker(time.Duration(geoReloadInterval * float64(time.Second)))
+			defer tick.Stop()
+			for {
+				select {
+				case <-ctlStop:
+					return
+				case <-tick.C:
+					st, err := os.Stat(geoPath)
+					if err != nil || !st.ModTime().After(lastMod) {
+						continue
+					}
+					lastMod = st.ModTime()
+					if n, err := reloadGeo(); err != nil {
+						log.Printf("geoip auto reload failed: %v", err)
+					} else {
+						log.Printf("geoip auto reloaded: %d entries", n)
+					}
+				}
+			}
+		}()
+	}
+
+	// 封禁表变化 → 重新下发内核；同时惰性清理过期封禁。
+	// 决策层已即时生效，此处只负责让 nftables 模式下的内核集合保持同步。
+	go func() {
+		lastVer := tracker.Version()
+		tick := time.NewTicker(2 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctlStop:
+				return
+			case <-tick.C:
+				if tracker.Prune() {
+					lastVer = tracker.Version()
+				}
+				if v := tracker.Version(); v != lastVer {
+					lastVer = v
+					reapplyCurrent()
+					log.Printf("ban set changed, re-applied ruleset to enforcer")
+				}
+			}
+		}
+	}()
 
 	// 统计 + 告警
 	var lastDropped uint64

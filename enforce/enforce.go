@@ -18,9 +18,11 @@ import (
 
 // geoRuleInfo 一条 geoip 规则在内核侧的编译结果。
 type geoRuleInfo struct {
-	setName string // nftables 集合名，如 geoip_RU / geoip_CN_US
-	negate  bool   // deny 模式为 true：匹配"不属于集合"（ip saddr != @set）
-	skip    bool   // 引用的国家库里无数据，整条规则跳过并告警
+	setName   string // IPv4 集合名，如 geoip_RU / geoip_CN_US
+	setNameV6 string // IPv6 集合名，如 geoip_RU_v6（库中无 v6 段时为空）
+	negate    bool   // deny 模式为 true：匹配"不属于集合"（ip saddr != @set）
+	skip      bool   // 引用的国家库里无数据，整条规则跳过并告警
+	skipV4    bool   // 该国无 IPv4 段，跳过 v4 语句（避免引用空集合）
 }
 
 // Enforcer 执行后端接口。
@@ -86,9 +88,19 @@ type NftablesEnforcer struct {
 	avail   *bool
 	geoDB   *geoip.DB // GeoIP 库，用于把国家码编译成内核集合
 
-	// 以下两字段仅在 buildScript 单次调用期间有效，用于 ruleToNft 复用预编译结果
-	geoSets map[string][]string
-	geoInfo map[*rules.Rule]*geoRuleInfo
+	// 以下字段仅在 buildScript 单次调用期间有效，用于 ruleToNft 复用预编译结果
+	geoSets   map[string][]string // IPv4 集合名 -> CIDR 元素
+	geoSetsV6 map[string][]string // IPv6 集合名 -> CIDR 元素
+	geoInfo   map[*rules.Rule]*geoRuleInfo
+
+	// banProvider 返回当前临时封禁的 IP（按地址族分开），由 main.go 注入。
+	// 每次 Apply 时读取，使动态封禁随规则热替换一起下发内核。
+	banProvider func() (v4, v6 []string)
+}
+
+// SetBanProvider 注入临时封禁列表提供者（来自 geoctl.Tracker）。
+func (n *NftablesEnforcer) SetBanProvider(fn func() (v4, v6 []string)) {
+	n.banProvider = fn
 }
 
 func (n *NftablesEnforcer) Name() string { return "NftablesEnforcer" }
@@ -164,18 +176,25 @@ func (n *NftablesEnforcer) buildScript(rs *rules.RuleSet) string {
 		def = "accept"
 	}
 
-	// 预编译 geoip 规则：把规则里出现的国家码编译成内核集合
-	n.geoSets, n.geoInfo = n.compileGeoIP(rs)
+	// 预编译 geoip 规则：把规则里出现的国家码编译成内核集合（v4 / v6 分开）
+	n.geoSets, n.geoSetsV6, n.geoInfo = n.compileGeoIP(rs)
 	defer func() {
 		n.geoSets = nil
+		n.geoSetsV6 = nil
 		n.geoInfo = nil
 	}()
+
+	// 当前临时封禁 IP（决策层已生效；内核层再补一层，确保 nftables 模式下也真正丢弃）
+	var banV4, banV6 []string
+	if n.banProvider != nil {
+		banV4, banV6 = n.banProvider()
+	}
 
 	var sb strings.Builder
 	// filter 表
 	sb.WriteString("table inet gofw {\n")
 
-	// GeoIP 命名集合（type ipv4_addr; flags interval），须在引用它的链之前声明
+	// GeoIP IPv4 命名集合（type ipv4_addr; flags interval），须在引用它的链之前声明
 	if len(n.geoSets) > 0 {
 		names := make([]string, 0, len(n.geoSets))
 		for name := range n.geoSets {
@@ -190,47 +209,86 @@ func (n *NftablesEnforcer) buildScript(rs *rules.RuleSet) string {
 			sb.WriteString("    }\n")
 		}
 	}
+	// GeoIP IPv6 命名集合（type ipv6_addr），与 v4 集合分开声明
+	if len(n.geoSetsV6) > 0 {
+		names := make([]string, 0, len(n.geoSetsV6))
+		for name := range n.geoSetsV6 {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			sb.WriteString(fmt.Sprintf("    set %s {\n", name))
+			sb.WriteString("        type ipv6_addr\n")
+			sb.WriteString("        flags interval\n")
+			sb.WriteString("        elements = { " + strings.Join(n.geoSetsV6[name], ", ") + " }\n")
+			sb.WriteString("    }\n")
+		}
+	}
+	// 动态临时封禁集合（自动封禁 + 手动封禁）
+	if len(banV4) > 0 {
+		sb.WriteString("    set gofw_ban_v4 {\n")
+		sb.WriteString("        type ipv4_addr\n")
+		sb.WriteString("        flags interval\n")
+		sb.WriteString("        elements = { " + strings.Join(banV4, ", ") + " }\n")
+		sb.WriteString("    }\n")
+	}
+	if len(banV6) > 0 {
+		sb.WriteString("    set gofw_ban_v6 {\n")
+		sb.WriteString("        type ipv6_addr\n")
+		sb.WriteString("        flags interval\n")
+		sb.WriteString("        elements = { " + strings.Join(banV6, ", ") + " }\n")
+		sb.WriteString("    }\n")
+	}
+
+	// banStmts 生成链首的封禁丢弃语句（优先级高于其余规则）
+	banStmts := func() string {
+		var s string
+		if len(banV4) > 0 {
+			s += "        ip saddr @gofw_ban_v4 drop comment \"gofw auto-ban\"\n"
+		}
+		if len(banV6) > 0 {
+			s += "        ip6 saddr @gofw_ban_v6 drop comment \"gofw auto-ban\"\n"
+		}
+		return s
+	}
+
+	// writeRule 输出一条规则在该链上的 v4 语句，以及 geoip 规则的 v6 变体。
+	writeRule := func(r *rules.Rule, chain string) {
+		if r.NAT != nil {
+			return // NAT 规则放到 nat 表
+		}
+		for _, ls := range n.ruleLimitStmts(r, chain) {
+			sb.WriteString("        " + ls + "\n")
+		}
+		if stmt := n.ruleToNftGeo(r, chain, false); stmt != "" {
+			sb.WriteString("        " + stmt + "\n")
+		}
+		if r.GeoIP != nil {
+			if stmt6 := n.ruleToNftGeo(r, chain, true); stmt6 != "" {
+				sb.WriteString("        " + stmt6 + "\n")
+			}
+		}
+	}
 
 	sb.WriteString("    chain input {\n")
 	sb.WriteString(fmt.Sprintf("        type filter hook input priority 0; policy %s;\n", def))
+	sb.WriteString(banStmts())
 	for _, r := range rs.Rules {
-		if r.NAT != nil {
-			continue // NAT 规则放到 nat 表
-		}
-		for _, ls := range n.ruleLimitStmts(r, "input") {
-			sb.WriteString("        " + ls + "\n")
-		}
-		if stmt := n.ruleToNft(r, "input"); stmt != "" {
-			sb.WriteString("        " + stmt + "\n")
-		}
+		writeRule(r, "input")
 	}
 	sb.WriteString("    }\n")
 	sb.WriteString("    chain output {\n")
 	sb.WriteString(fmt.Sprintf("        type filter hook output priority 0; policy %s;\n", def))
+	sb.WriteString(banStmts())
 	for _, r := range rs.Rules {
-		if r.NAT != nil {
-			continue
-		}
-		for _, ls := range n.ruleLimitStmts(r, "output") {
-			sb.WriteString("        " + ls + "\n")
-		}
-		if stmt := n.ruleToNft(r, "output"); stmt != "" {
-			sb.WriteString("        " + stmt + "\n")
-		}
+		writeRule(r, "output")
 	}
 	sb.WriteString("    }\n")
 	sb.WriteString("    chain forward {\n")
 	sb.WriteString(fmt.Sprintf("        type filter hook forward priority 0; policy %s;\n", def))
+	sb.WriteString(banStmts())
 	for _, r := range rs.Rules {
-		if r.NAT != nil {
-			continue
-		}
-		for _, ls := range n.ruleLimitStmts(r, "forward") {
-			sb.WriteString("        " + ls + "\n")
-		}
-		if stmt := n.ruleToNft(r, "forward"); stmt != "" {
-			sb.WriteString("        " + stmt + "\n")
-		}
+		writeRule(r, "forward")
 	}
 	sb.WriteString("    }\n")
 	sb.WriteString("}\n")
@@ -249,8 +307,9 @@ func (n *NftablesEnforcer) buildScript(rs *rules.RuleSet) string {
 //   - allow 模式（如 geoip: allow:CN）：匹配"属于列表国家" → 内核 matcher 直接命中
 // 若规则引用的国家在本机 GeoIP 库里没有任何网段，则整条规则跳过并告警，
 // 避免生成空集合导致 "ip saddr != @空集" 命中全部流量而误杀全网。
-func (n *NftablesEnforcer) compileGeoIP(rs *rules.RuleSet) (map[string][]string, map[*rules.Rule]*geoRuleInfo) {
+func (n *NftablesEnforcer) compileGeoIP(rs *rules.RuleSet) (map[string][]string, map[string][]string, map[*rules.Rule]*geoRuleInfo) {
 	sets := map[string][]string{}
+	setsV6 := map[string][]string{}
 	info := map[*rules.Rule]*geoRuleInfo{}
 
 	hasDB := n.geoDB != nil && n.geoDB.Loaded()
@@ -268,27 +327,40 @@ func (n *NftablesEnforcer) compileGeoIP(rs *rules.RuleSet) (map[string][]string,
 			info[r] = &geoRuleInfo{skip: true}
 			continue
 		}
-		var elems []string
+		var elemsV4, elemsV6 []string
 		missing := false
 		for _, c := range codes {
-			cidrs := n.geoDB.CIDRsForCountry(c)
-			if len(cidrs) == 0 {
+			v4, v6 := n.geoDB.CIDRsForCountrySplit(c)
+			if len(v4) == 0 && len(v6) == 0 {
 				log.Printf("[geoip] WARN: 国家 %s 不在 GeoIP 库中，跳过规则: %s", c, r.String())
 				missing = true
 				break
 			}
-			elems = append(elems, cidrs...)
+			elemsV4 = append(elemsV4, v4...)
+			elemsV6 = append(elemsV6, v6...)
 		}
 		if missing {
 			info[r] = &geoRuleInfo{skip: true}
 			continue
 		}
-		setName := "geoip_" + strings.Join(codes, "_")
-		elems = dedupSorted(elems)
-		sets[setName] = elems
-		info[r] = &geoRuleInfo{setName: setName, negate: r.GeoIP.Mode == "deny"}
+		base := "geoip_" + strings.Join(codes, "_")
+		setName := base
+		setNameV6 := ""
+		if len(elemsV4) > 0 {
+			sets[setName] = dedupSorted(elemsV4)
+		}
+		if len(elemsV6) > 0 {
+			setNameV6 = base + "_v6"
+			setsV6[setNameV6] = dedupSorted(elemsV6)
+		}
+		info[r] = &geoRuleInfo{
+			setName:   setName,
+			setNameV6: setNameV6,
+			negate:    r.GeoIP.Mode == "deny",
+			skipV4:    len(elemsV4) == 0, // 仅有 v6 数据时跳过 v4 语句，避免引用空集合
+		}
 	}
-	return sets, info
+	return sets, setsV6, info
 }
 
 func sortedCountryCodes(g *rules.GeoIPSpec) []string {
@@ -431,6 +503,14 @@ func (n *NftablesEnforcer) natRuleToNft(r *rules.Rule, natType, family string) s
 // ok=false 表示整条规则在该链上应跳过（方向不匹配 / GeoIP 库缺数据），
 // 调用方必须据此跳过，否则会退化成无匹配器的裸 accept/drop 误伤全网。
 func (n *NftablesEnforcer) buildMatchers(r *rules.Rule, chain string) (matchers []string, ok bool) {
+	return n.buildMatchersGeo(r, chain, false)
+}
+
+// buildMatchersGeo 生成匹配表达式。v6=true 时用于 geoip 规则的 IPv6 变体：
+// 仅把 geoip 集合换成 v6 集合并改用 ip6 saddr/daddr；其余匹配保持原样。
+// 非 geoip 规则在 v6=true 时返回 ok=false（nftables inet 族下一条语句已同时覆盖两族，
+// 无需重复下发，否则会造成双份规则）。
+func (n *NftablesEnforcer) buildMatchersGeo(r *rules.Rule, chain string, v6 bool) (matchers []string, ok bool) {
 	// 方向过滤：in→input, out→output, any→所有链（含 forward）
 	switch r.Direction {
 	case rules.DirIn:
@@ -517,20 +597,42 @@ func (n *NftablesEnforcer) buildMatchers(r *rules.Rule, chain string) (matchers 
 	// GeoIP：下沉内核匹配（仅在 geoip 规则且已编译时）。
 	// 入站/转发看源国家（ip saddr），出站看目标国家（ip daddr）。
 	if n.geoInfo != nil {
-		if gi := n.geoInfo[r]; gi != nil {
-			if gi.skip {
-				return nil, false // 整条规则跳过（库里缺数据），交由告警日志提示
-			}
-			addr := "ip saddr"
-			if chain == "output" {
-				addr = "ip daddr"
-			}
-			if gi.negate {
-				matchers = append(matchers, addr+" != "+"@"+gi.setName)
+		if gi := n.geoInfo[r]; gi != nil && r.GeoIP != nil {
+			if v6 {
+				// IPv6 变体：无 v6 数据则不下发这条，避免引用空集合。
+				if gi.setNameV6 == "" {
+					return nil, false
+				}
+				addr := "ip6 saddr"
+				if chain == "output" {
+					addr = "ip6 daddr"
+				}
+				if gi.negate {
+					matchers = append(matchers, addr+" != "+"@"+gi.setNameV6)
+				} else {
+					matchers = append(matchers, addr+" "+"@"+gi.setNameV6)
+				}
 			} else {
-				matchers = append(matchers, addr+" "+"@"+gi.setName)
+				if gi.skip || gi.skipV4 {
+					return nil, false // 库里缺数据，交由告警日志提示
+				}
+				addr := "ip saddr"
+				if chain == "output" {
+					addr = "ip daddr"
+				}
+				if gi.negate {
+					matchers = append(matchers, addr+" != "+"@"+gi.setName)
+				} else {
+					matchers = append(matchers, addr+" "+"@"+gi.setName)
+				}
 			}
 		}
+	} else if v6 {
+		return nil, false
+	}
+	// 非 geoip 规则不产出 v6 变体（inet 族单条语句已覆盖两族）
+	if r.GeoIP == nil && v6 {
+		return nil, false
 	}
 
 	if r.State != "" {
@@ -543,7 +645,12 @@ func (n *NftablesEnforcer) buildMatchers(r *rules.Rule, chain string) (matchers 
 // ruleToNft 生成规则在指定链上的完整语句（匹配 + 动作）。
 // 方向不匹配 / GeoIP 缺数据时返回空串，由调用方跳过。
 func (n *NftablesEnforcer) ruleToNft(r *rules.Rule, chain string) string {
-	matchers, ok := n.buildMatchers(r, chain)
+	return n.ruleToNftGeo(r, chain, false)
+}
+
+// ruleToNftGeo 生成一条完整规则语句；v6=true 时生成 geoip 规则的 IPv6 变体。
+func (n *NftablesEnforcer) ruleToNftGeo(r *rules.Rule, chain string, v6 bool) string {
+	matchers, ok := n.buildMatchersGeo(r, chain, v6)
 	if !ok {
 		return ""
 	}

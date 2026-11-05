@@ -432,5 +432,7 @@ func Save(rs *rules.RuleSet, path string) error {
 	if err != nil {
 		return err
 	}
+	// 把原文件里人工维护的注释按锚点迁移回来，避免后台保存抹掉分段说明。
+	data = preserveComments(path, data)
 	return os.WriteFile(path, data, 0644)
 }
