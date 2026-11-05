@@ -176,18 +176,19 @@ textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;l
     </div>
 
     <div class="content">
+      <div id="global-mode-banner" class="panel" style="margin-bottom:14px;padding:10px 14px"></div>
       <!-- 概览 -->
       <section class="section active" id="sec-overview">
         <div class="grid cards" style="margin-bottom:14px">
           <div class="card stat"><div class="label"><span class="dot" style="background:var(--accent)"></span>总包量</div><div class="val" id="s-packets">0</div></div>
           <div class="card stat"><div class="label"><span class="dot" style="background:var(--green)"></span>已放行</div><div class="val" id="s-accept">0</div></div>
-          <div class="card stat"><div class="label"><span class="dot" style="background:var(--red)"></span>已拦截</div><div class="val" id="s-drop">0</div></div>
+          <div class="card stat"><div class="label"><span class="dot" style="background:var(--red)"></span>判定拦截</div><div class="val" id="s-drop">0</div></div>
           <div class="card stat"><div class="label"><span class="dot" style="background:var(--amber)"></span>流量</div><div class="val" id="s-bytes">0</div></div>
           <div class="card stat"><div class="label"><span class="dot" style="background:var(--violet)"></span>活跃连接</div><div class="val" id="s-conns">0</div></div>
         </div>
         <div class="panel">
           <h2>实时吞吐</h2>
-          <div class="sub">每秒包量（青）与每秒拦截（红），最近 60 个采样点</div>
+          <div class="sub">每秒包量（青）与每秒判定拦截（红），最近 60 个采样点；<b>monitor 下为引擎判定，不代表内核真实丢包</b></div>
           <div class="chartbox"><svg class="chart" id="chart" viewBox="0 0 600 170" preserveAspectRatio="none"></svg></div>
           <div class="legend"><span><i style="background:var(--accent)"></i>包/秒</span><span><i style="background:var(--red)"></i>拦截/秒</span></div>
         </div>
@@ -250,10 +251,10 @@ textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;l
       <section class="section" id="sec-system">
         <div class="panel">
           <h2>引擎能力中心</h2>
-          <div class="sub">gofw 防火墙引擎内置的模块能力总览。状态实时反映当前运行实例。</div>
+          <div class="sub">gofw 防火墙引擎内置的模块能力总览。状态取自运行实例真实字段（执行后端、GeoIP 库、DPI、连接跟踪、自动封禁配置），不靠规则注释猜测。</div>
           <div class="cap-grid" id="cap-grid">加载中…</div>
           <div style="margin-top:26px">
-            <div class="sub" style="margin-bottom:12px">依据当前规则集实时推导的防护能力（数据来自引擎真实规则）</div>
+            <div class="sub" style="margin-bottom:12px">依据当前规则集字段推导的防护能力（只表示规则里写了什么，<b>不等于内核已生效</b>；真实生效状态看上面的「执行后端」）</div>
             <div class="cap-grid" id="cap-grid2">加载中…</div>
           </div>
         </div>
@@ -656,25 +657,41 @@ function sysErr(grid,msg){
   const el=document.getElementById(grid);
   if(el) el.innerHTML='<div class="cap" style="grid-column:1/-1"><h3 style="color:#ff8a8a">⚠ 渲染异常</h3><div class="desc">'+esc(msg)+'</div></div>';
 }
+function renderModeBanner(backend){
+  const el=$('#global-mode-banner'); if(!el)return;
+  const kernel=backend==='kernel';
+  el.style.borderColor=kernel?'rgba(52,211,153,.4)':'rgba(251,191,36,.45)';
+  el.innerHTML= kernel
+    ? '<b style="color:var(--green)">内核生效模式（nftables）</b>　规则已下发内核，会真实丢弃数据包；页面上的拦截数即实际丢包。'
+    : '<b style="color:var(--amber)">旁路监控模式（monitor）</b>　当前只记录决策 / 统计 / 日志，<b>不会真实丢包</b>：页面所有「拦截 / 丢弃」数字都是引擎判定，流量照常通过。地理围栏可配置、可预演，但要真正断网需去掉启动参数 <code>--monitor</code> 切到 nftables 后端（切换前确认护栏已放行管理通道）。';
+}
+let sysBackend='monitor';
 async function sysTick(){
-  // 模块能力 (来自 /api/system)
+  // 模块能力 (来自 /api/system，全部为运行实例真实字段)
   try{
     const d=await jget('/api/system');
     const geo=d.geoip||{}, dpi=d.dpi||{}, ct=d.conntrack||{}, eng=d.engine||{};
+    const gf=d.geofence||{}, ban=d.autoban||{};
+    sysBackend=d.backend||'monitor';
+    const kernel=sysBackend==='kernel';
     const caps=[
-      {name:'GeoIP 地理位置', desc:'按源 IP 国家做 allow/deny 匹配，需加载 IP 库', on:geo.loaded, onText:'已加载', offText:'未加载', extra:[['国家条目',fmt(geo.count)||0]]},
+      {name:'执行后端', desc: kernel?'规则已下发内核 nftables，会真实丢弃数据包':'旁路监控：抓包 / 匹配 / 决策 / 统计全跑，但不真实丢包', on:true, tone:kernel?'green':'amber', onText:kernel?'内核生效 (nftables)':'旁路监控 (monitor)', offText:'', extra:[['真实丢包',kernel?'是':'否'],['规则数',eng.rules||0],['地理围栏',gf.active?'已启用':'未启用'],['自动封禁',ban.enabled?'已启用':'已关闭']]},
+      {name:'GeoIP 地理位置', desc:'最长前缀索引 + 定时热加载，按源 IP 国家做 allow/deny 匹配', on:geo.loaded, onText:'已加载', offText:'未加载', extra:[['总条目',fmt(geo.count)||0],['IPv4 段',fmt(geo.v4)||0],['IPv6 段',fmt(geo.v6)||0],['国家/地区',geo.countries||0],['来源',geo.source==='external'?'外部 CSV':'内置库']]},
       {name:'DPI 深度包检测', desc:'识别 HTTP/TLS/SSH/DNS 等应用层协议', on:dpi.enabled, onText:'已启用', offText:'未启用', chips:dpi.protocols||[]},
       {name:'连接跟踪', desc:'TCP 状态机 + UDP/ICMP 连接表', on:true, onText:'运行中', offText:'停止', extra:[['总连接',ct.total||0],['已建立',ct.established||0],['TCP',ct.tcp||0],['UDP',ct.udp||0]]},
       {name:'IP 分片重组', desc:'跨分片包重组后统一匹配', on:d.frag&&d.frag.enabled, onText:'已启用', offText:'未启用'},
-      {name:'引擎统计', desc:'实时包量 / 放行 / 拦截计数', on:true, onText:'运行中', offText:'停止', extra:[['总包',fmt(eng.packets)||0],['放行',fmt(eng.accepted)||0],['拦截',fmt(eng.dropped)||0],['流量',fmt(eng.bytes)||0]]}
+      {name:'引擎统计', desc:'实时包量 / 放行 / 判定拦截计数（monitor 下拦截 ≠ 真实丢包）', on:true, onText:'运行中', offText:'停止', extra:[['总包',fmt(eng.packets)||0],['放行',fmt(eng.accepted)||0],['判定拦截',fmt(eng.dropped)||0],['流量',fmt(eng.bytes)||0]]}
     ];
     $('#cap-grid').innerHTML=caps.map(c=>{
-      const st=`<span class="status ${c.on?'on':'off'}">${c.on?c.onText:c.offText}</span>`;
+      const st= c.tone
+        ? `<span class="status" style="background:rgba(${c.tone==='amber'?'251,191,36':'52,211,153'},.14);color:var(--${c.tone==='amber'?'amber':'green'})">${c.onText}</span>`
+        : `<span class="status ${c.on?'on':'off'}">${c.on?c.onText:c.offText}</span>`;
       let body='';
       if(c.chips&&c.chips.length){ body='<div class="chips">'+c.chips.map(x=>`<span class="chip">${esc(x)}</span>`).join('')+'</div>'; }
       else if(c.extra){ body=c.extra.map(([k,v])=>`<div class="kv"><span>${k}</span><b>${esc(v)}</b></div>`).join(''); }
       return `<div class="cap"><h3>${esc(c.name)} ${st}</h3><div class="desc">${esc(c.desc)}</div>${body}</div>`;
     }).join('');
+    renderModeBanner(sysBackend);
   }catch(e){ sysErr('cap-grid', 'system: '+(e&&e.message||e)); }
 
   // 规则推导防护能力 (基于真实字段: action/comment/detail/name)
@@ -694,7 +711,7 @@ async function sysTick(){
       {name:'异常包 / 扫描拦截', on:anomaly, detail: anomaly?'拦截 Xmas / FIN-only / SYN+FIN / bogon / IPv6 bogon':'未配置'},
       {name:'GeoIP 地理围栏', on:geo, detail: geo?'按来源国家放行 / 拦截':'未配置'},
       {name:'IPv6 防护', on:ipv6, detail: ipv6?'已启用 IPv6 源地址防护（回环/链路本地/组播拦截）':'未配置'},
-      {name:'规则引擎 (nftables)', on:R.length>0, detail:'当前 '+R.length+' 条规则实时生效'}
+      {name:'规则引擎', on:R.length>0, detail:'当前 '+R.length+' 条规则；'+(sysBackend==='kernel'?'已下发内核 nftables，真实生效':'在用户态参与决策，monitor 试跑，未下发内核')}
     ];
     $('#cap-grid2').innerHTML=prot.map(p=>`<div class="cap"><h3>${esc(p.name)} <span class="status ${p.on?'on':'off'}">${p.on?'已启用':'未启用'}</span></h3><div class="desc">${esc(p.detail)}</div></div>`).join('');
   }catch(e){ sysErr('cap-grid2', 'rules: '+(e&&e.message||e)); }
@@ -765,11 +782,17 @@ async function geoStats(){
       <span class="mono" style="width:34px;color:var(--accent)">${esc(x.country)}</span>
       <div class="bar" style="flex:1"><i style="width:${(100*(x.packets||0)/max).toFixed(0)}%;background:${(x.dropped||0)>0?'var(--red)':'var(--accent)'}"></i></div>
       <span class="mono" style="width:120px;text-align:right">${fmt(x.packets)} / <span style="color:var(--red)">${fmt(x.dropped)}</span></span></div>`).join('')+
-      '<div class="hint">左：包量　右红：被丢弃　（每 5 秒刷新）</div>':'<div class="empty">暂无数据</div>';
+      '<div class="hint">左：包量　右红：判定丢弃（monitor 下非真丢包）　（每 5 秒刷新）</div>':'<div class="empty">暂无数据</div>';
     const bans=d.bans||[];
     $('#ban-list').innerHTML=bans.length?('<table><thead><tr><th>IP</th><th>来源</th><th>到期</th><th></th></tr></thead><tbody>'+
       bans.map(b=>`<tr><td class="mono">${esc(b.ip)}</td><td>${esc(b.country||'??')} · ${esc(b.reason)}</td><td class="mono">${b.until?new Date(b.until*1000).toLocaleTimeString():'永久'}</td><td><button class="btn sm danger" onclick="banRemove('${encodeURIComponent(b.ip)}')">解封</button></td></tr>`).join('')+'</tbody></table>'):'<div class="empty">暂无封禁</div>';
-    if(d.config){ $('#ban-enabled').checked=!!d.config.enabled; $('#ban-threshold').value=d.config.threshold; $('#ban-window').value=d.config.window_sec; $('#ban-ttl').value=d.config.ban_sec; }
+    if(d.config){
+      const idle=(id,v,prop)=>{ const el=$(id); if(!el||document.activeElement===el)return; el[prop]=v; };
+      idle('#ban-enabled',!!d.config.enabled,'checked');
+      idle('#ban-threshold',d.config.threshold,'value');
+      idle('#ban-window',d.config.window_sec,'value');
+      idle('#ban-ttl',d.config.ban_sec,'value');
+    }
   }catch(e){ /* 统计接口降级不阻断页面 */ }
 }
 async function geoApply(preset){
