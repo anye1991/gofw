@@ -511,6 +511,11 @@ func (n *NftablesEnforcer) buildMatchers(r *rules.Rule, chain string) (matchers 
 // 非 geoip 规则在 v6=true 时返回 ok=false（nftables inet 族下一条语句已同时覆盖两族，
 // 无需重复下发，否则会造成双份规则）。
 func (n *NftablesEnforcer) buildMatchersGeo(r *rules.Rule, chain string, v6 bool) (matchers []string, ok bool) {
+	// 城市 / ASN 级条件只在用户态决策层可表达，nftables 没有对应匹配器。
+	// 必须整条跳过内核下发：否则会退化成无匹配器的裸 accept/drop，误伤全网。
+	if r.GeoCity != "" || r.GeoASN != "" {
+		return nil, false
+	}
 	// 方向过滤：in→input, out→output, any→所有链（含 forward）
 	switch r.Direction {
 	case rules.DirIn:
@@ -774,6 +779,38 @@ func protoName(p uint8) string {
 		return "icmpv6"
 	}
 	return "any"
+}
+
+// Validate 只做 nftables 语法 / 权限预检，不改动内核规则。
+// 用 `nft -c -f -` 对本次要下发的完整脚本做 check-only 校验，
+// 供运行时切换后端前调用，避免把有语法错误的规则集真正写进内核。
+func (n *NftablesEnforcer) Validate(rs *rules.RuleSet) error {
+	path, err := exec.LookPath("nft")
+	if err != nil {
+		return fmt.Errorf("nft 命令不存在：%w", err)
+	}
+	// check-only 也需要能读内核表状态；权限不足时给出明确提示。
+	if err := exec.Command(path, "list", "tables").Run(); err != nil {
+		return fmt.Errorf("当前进程无 nftables 管理权限（需 CAP_NET_ADMIN / root）：%w", err)
+	}
+	script := n.buildScript(rs)
+	cmd := exec.Command(path, "-c", "-f", "-")
+	cmd.Stdin = strings.NewReader(script)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("nft 语法校验失败：%s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// NewNftables 构造一个未下发的 nftables 后端，用于预检与运行时切换。
+func NewNftables(geoDB *geoip.DB, banProvider func() (v4, v6 []string)) *NftablesEnforcer {
+	n := &NftablesEnforcer{}
+	if geoDB != nil {
+		n.SetGeoIP(geoDB)
+	}
+	n.SetBanProvider(banProvider)
+	return n
 }
 
 // BuildEnforcer 工厂：优先 nftables，不可用降级 monitor。

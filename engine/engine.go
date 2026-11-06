@@ -515,15 +515,15 @@ func (e *Engine) publish(action string, rule *rules.Rule, p *packet.Packet, coun
 		}
 	}
 	ev := Event{
-		TS:          time.Now().Unix(),
-		Action:      action,
-		SrcIP:       p.SrcIP.String(),
-		SrcPort:     p.SrcPort,
-		DstIP:       p.DstIP.String(),
-		DstPort:     p.DstPort,
-		Proto:       p.Proto,
-		Country:     country,
-		RuleIndex:   idx,
+		TS:        time.Now().Unix(),
+		Action:    action,
+		SrcIP:     p.SrcIP.String(),
+		SrcPort:   p.SrcPort,
+		DstIP:     p.DstIP.String(),
+		DstPort:   p.DstPort,
+		Proto:     p.Proto,
+		Country:   country,
+		RuleIndex: idx,
 	}
 	if rule != nil {
 		ev.RuleComment = rule.Comment
@@ -583,10 +583,10 @@ func (e *Engine) Decide(p *packet.Packet) Decision {
 
 	_, connState := e.Conntrack.Lookup(p)
 
-	// GeoIP 查询
-	srcCountry := ""
+	// GeoIP 查询（国家 + 可选城市 / ASN 扩展列）
+	srcCountry, srcCity, srcASN := "", "", ""
 	if e.GeoIP != nil && e.GeoIP.Loaded() {
-		srcCountry = e.GeoIP.Lookup(p.SrcIP)
+		srcCountry, srcCity, srcASN = e.GeoIP.LookupFull(p.SrcIP)
 	}
 
 	// DPI 应用层协议识别
@@ -601,7 +601,7 @@ func (e *Engine) Decide(p *packet.Packet) Decision {
 		Proto: p.Proto, SrcPort: p.SrcPort, DstPort: p.DstPort,
 		TCPFlags: p.TCPFlags, VLAN: p.VLAN, ConnState: connState,
 		Now: time.Now(), PacketLen: len(p.Raw),
-		SrcCountry: srcCountry, AppProto: appProto,
+		SrcCountry: srcCountry, City: srcCity, ASN: srcASN, AppProto: appProto,
 		// 抓包为混杂模式，用户态无法可靠区分入/出站；显式设为 any，
 		// 使带 direction 的规则仍参与用户态决策（精确的方向过滤由内核
 		// nftables 按 input/output/forward 链完成）。否则 c.Direction 为空串，

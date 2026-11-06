@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gofw/audit"
 	"gofw/config"
 	"gofw/engine"
 	"gofw/geoctl"
@@ -38,8 +39,10 @@ type Server struct {
 	apply     func(*rules.RuleSet) // 应用新规则集的回调（热替换 + nftables）
 	mu        sync.Mutex           // 写操作互斥锁，防止并发修改导致丢失更新
 
-	password string             // 非空时启用登录鉴权（来自环境变量 GOFW_WEB_PASSWORD）
-	sessions map[string]int64   // sid -> 过期时间戳
+	password string           // 非空时启用登录鉴权（环境变量 / 持久化文件 / 页面设置）
+	passMu   sync.RWMutex     // 允许运行时启用 / 停用登录保护
+	authFile string           // 密码持久化文件路径
+	sessions map[string]int64 // sid -> 过期时间戳
 	sessMu   sync.Mutex
 
 	// 地理围栏扩展（通过 SetGeo 注入，均为可选；nil 时相关 API 返回降级信息）
@@ -47,7 +50,12 @@ type Server struct {
 	reloadGeo func() (int, error) // 重新加载 GeoIP CSV，返回条目数
 	geoPath   string              // GeoIP 库文件路径（展示用）
 	geoSource string              // 库来源 "external" / "builtin"
-	backend   string              // 执行后端 "kernel"(nftables 真实丢包) / "monitor"(旁路记录)
+	backend   string              // 启动时的执行后端（运行时以 backendCtl 为准）
+
+	// 系统增强：审计日志、运行时后端切换、多机策略同步密钥
+	auditLog   *audit.Logger
+	backendCtl BackendController
+	syncSecret string
 }
 
 // New 创建 Web 管理服务器。
@@ -60,9 +68,7 @@ func New(engPtr *atomic.Pointer[engine.Engine], rsPtr *atomic.Pointer[rules.Rule
 		rulesFile: rulesFile,
 		apply:     apply,
 		password:  strings.TrimSpace(os.Getenv("GOFW_WEB_PASSWORD")),
-	}
-	if s.password != "" {
-		s.sessions = make(map[string]int64)
+		sessions:  make(map[string]int64),
 	}
 	return s
 }
@@ -100,6 +106,14 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/geoip/reload", s.auth(s.handleGeoReload))
 	mux.HandleFunc("/api/bans", s.auth(s.handleBans))
 	mux.HandleFunc("/api/bans/", s.auth(s.handleBans))
+	// 系统增强：运行时后端切换、审计日志、登录保护、策略同步、GeoIP 精度
+	mux.HandleFunc("/api/backend", s.auth(s.handleBackend))
+	mux.HandleFunc("/api/backend/", s.auth(s.handleBackendAction))
+	mux.HandleFunc("/api/audit", s.auth(s.handleAudit))
+	mux.HandleFunc("/api/auth", s.auth(s.handleAuth))
+	mux.HandleFunc("/api/sync", s.auth(s.handleSync))
+	mux.HandleFunc("/api/geoip/lookup", s.auth(s.handleGeoLookup))
+	mux.HandleFunc("/api/geoip/meta", s.auth(s.handleGeoMeta))
 	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 	mux.HandleFunc("/", s.auth(s.handleIndex))
 
@@ -129,10 +143,12 @@ func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
 // auth 中间件：未设置密码时放行；设置密码时，仅对 /api/* 校验会话 cookie，
 // 登录接口本身匿名可达，页面（含登录框）始终返回以便前端引导登录。
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
-	if s.password == "" {
-		return next
-	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		// 运行时判断：页面启用登录保护后立即生效，无需重启。
+		if s.currentPassword() == "" {
+			next(w, r)
+			return
+		}
 		if r.URL.Path == "/api/login" || !strings.HasPrefix(r.URL.Path, "/api/") {
 			next(w, r)
 			return
@@ -143,6 +159,25 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		next(w, r)
+	}
+}
+
+func (s *Server) currentPassword() string {
+	s.passMu.RLock()
+	defer s.passMu.RUnlock()
+	return s.password
+}
+
+func (s *Server) setPassword(p string) {
+	s.passMu.Lock()
+	s.password = strings.TrimSpace(p)
+	s.passMu.Unlock()
+}
+
+// alog 写审计日志；logger 未注入时静默跳过。
+func (s *Server) alog(kind, detail string, fields map[string]interface{}) {
+	if s.auditLog != nil {
+		s.auditLog.Log(kind, "web", detail, fields)
 	}
 }
 
@@ -158,7 +193,8 @@ func (s *Server) validSession(sid string) bool {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if s.password == "" {
+	pw := s.currentPassword()
+	if pw == "" {
 		writeJSON(w, map[string]interface{}{"ok": true, "auth": false, "note": "no password configured"})
 		return
 	}
@@ -170,10 +206,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
-	if subtle.ConstantTimeCompare([]byte(body.Password), []byte(s.password)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(body.Password), []byte(pw)) != 1 {
 		writeError(w, http.StatusUnauthorized, "invalid password")
 		return
 	}
+	s.alog("auth.login", "登录成功", nil)
 	sid := randHex(32)
 	s.sessMu.Lock()
 	s.sessions[sid] = time.Now().Add(sessionTTL).Unix()
@@ -329,6 +366,12 @@ func ruleToMap(rl *rules.Rule) map[string]interface{} {
 			m["geoip"] = s
 		}
 	}
+	if rl.GeoCity != "" {
+		m["geo_city"] = rl.GeoCity
+	}
+	if rl.GeoASN != "" {
+		m["geo_asn"] = rl.GeoASN
+	}
 	if rl.AppProto != "" {
 		m["app_proto"] = rl.AppProto
 	}
@@ -375,10 +418,19 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	if s.geoCtl != nil {
 		banCfg = s.geoCtl.GetConfig()
 	}
-	backend := s.backend
-	if backend == "" {
-		backend = "monitor"
+	backend := "monitor"
+	if s.backendCtl != nil {
+		backend = s.backendCtl.Mode()
+	} else if s.backend != "" {
+		backend = s.backend
 	}
+	cities, asns, _ := 0, 0, false
+	if eng.GeoIP != nil {
+		cities, asns, _ = eng.GeoIP.MetaSummary()
+	}
+	authEnabled := s.currentPassword() != ""
+	auditEnabled := s.auditLog != nil
+	syncEnabled := s.syncSecret != ""
 	writeJSON(w, map[string]interface{}{
 		"backend": backend,
 		"geoip": map[string]interface{}{
@@ -396,6 +448,20 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 			"fences": fenceCount,
 		},
 		"autoban": banCfg,
+		"precision": map[string]interface{}{
+			"level": func() string {
+				if cities > 0 || asns > 0 {
+					return "city/asn"
+				}
+				return "country"
+			}(),
+			"cities": cities, "asns": asns,
+		},
+		"services": map[string]interface{}{
+			"auth":  authEnabled,
+			"audit": auditEnabled,
+			"sync":  syncEnabled,
+		},
 		"dpi": map[string]interface{}{
 			"enabled": true,
 			"protocols": []string{"http", "tls", "ssh", "ftp", "smtp", "imap",
@@ -616,6 +682,7 @@ func (s *Server) cloneRuleset() *rules.RuleSet {
 
 // commit 保存规则集到文件并热应用到引擎。
 func (s *Server) commit(rs *rules.RuleSet) error {
+	s.alog("rules", "规则集已保存并热应用", map[string]interface{}{"rules": rs.Len(), "default": rs.DefaultAction})
 	if s.rulesFile != "" {
 		if err := config.Save(rs, s.rulesFile); err != nil {
 			return fmt.Errorf("save rules: %w", err)
