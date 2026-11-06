@@ -48,6 +48,10 @@ func (m *MonitorEnforcer) Apply(rs *rules.RuleSet) bool {
 }
 
 func (m *MonitorEnforcer) OnDecision(d engine.Decision) {
+	// 每个包一行日志在低配 VM 上会拖死 journald / 磁盘 IO，见 decisionlog.go。
+	if !decisionLog.allow() {
+		return
+	}
 	p := d.Packet
 	ruleInfo := "default-policy"
 	if d.Rule != nil {
@@ -166,6 +170,10 @@ func (n *NftablesEnforcer) Flush() {
 }
 
 func (n *NftablesEnforcer) OnDecision(d engine.Decision) {
+	// DROP 风暴同样会打爆日志；精确数量仍由 engine 统计与审计日志保留。
+	if !decisionLog.allow() {
+		return
+	}
 	switch d.Action {
 	case rules.ActionDrop:
 		log.Printf("DROP %s state=%s", d.Packet.Summary(), d.ConnState)

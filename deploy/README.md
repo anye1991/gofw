@@ -131,3 +131,28 @@ ssh root@<服务器IP> 'nft list table inet gofw'   # 应见 table inet gofw 及
 ssh root@<服务器IP> '/opt/gofw/gofw rules list -r /opt/gofw/rules.yaml'  # 仅解析不应用
 ```
 浏览器访问 `https://gofw.<域名>/`，用密码登录可看到完整管理面板与能力中心。
+
+---
+
+## 六、稳定性：低配机器必做的三项配置
+
+内网 2 GB 内存的 VM 上曾反复出现「ping 通、端口能连，但 SSH / Web 完全无响应」，内核无 OOM、systemd 反复 `Failed with result 'timeout'`。根因不是服务崩溃，而是**每个包一行日志、且同时写 systemd journal 与文件（双写）**，叠加混杂模式抓全网段包与页面轮询自激，把 journald / 磁盘 IO 打满。详见 [README 稳定性章节](../README.md#-稳定性低配机器为什么会连不上)。
+
+部署时务必确认以下三项：
+
+```bash
+# 1. 每包决策日志限速（默认 20 行/秒；0=关，-1=不限但低配机器别用）
+grep -- '--log-packet-rate' /etc/systemd/system/gofw.service
+
+# 2. gofw.log 轮转（daily / 50 MiB / 7 份 / copytruncate，进程持有 fd 必须 copytruncate）
+cat /etc/logrotate.d/gofw
+sudo logrotate -d /etc/logrotate.d/gofw          # 语法校验
+sudo logrotate -f /etc/logrotate.d/gofw          # 首次强制轮转并确认服务仍在写
+
+# 3. journal 上限（默认无上限，实测曾涨到 1.0 G）
+grep '^SystemMaxUse' /etc/systemd/journald.conf  # SystemMaxUse=300M
+sudo systemctl restart systemd-journald
+journalctl --disk-usage
+```
+
+验证是否生效：`journalctl -u gofw | grep 'decision log rate'` 应显示限速值；并发打一轮 API 后 `stats:` 行应出现 `log_suppressed=N`（被省略的流水行数，如实汇总，不是丢数据）。精确包数 / 拦截数看 `/api/stats`，不依赖日志流水。

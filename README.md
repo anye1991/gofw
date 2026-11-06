@@ -228,6 +228,7 @@ ExecStart=/opt/gofw/gofw start -r /opt/gofw/rules.yaml -i ens32 --web :18081 --m
 - 访问：`http://192.168.58.128:18081/`（**不是 80 / 8981 / 8080**）。
 - 产物：`GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o gofw.linux .`，单文件约 11 MB，scp 覆盖 `/opt/gofw/gofw` 后重启即可。
 - 备份：`gofw.bak.*`、`gofw.service.bak.*`、`rules.yaml.geoip.bak.*`；规则文件 `rules.yaml` 保持原始 27 条。
+- 稳定性配置：`--log-packet-rate 20`、`/etc/logrotate.d/gofw`（50 MiB / 7 份 / copytruncate）、`journald.conf` 的 `SystemMaxUse=300M`；详见下方「稳定性」章节。
 - 回滚：代码回退到 `dba12b2`（本次增强前），或用备份二进制替换后 `systemctl restart gofw`。
 
 ---
@@ -265,8 +266,37 @@ sudo ./gofw.linux start -r rules.yaml -i ens32 --web :18081
 | `--audit-file` | `rules.yaml.audit.jsonl` | 审计日志文件（8 MiB × 5 轮转） |
 | `--web-auth-file` | `rules.yaml.webauth` | Web 登录密码持久化文件（0600） |
 | `--sync-secret` | 空（`GOFW_SYNC_SECRET`） | 多机策略同步 HMAC 密钥，空则导入禁用 |
+| `--log-packet-rate` | `20` | **每包决策日志限速（行/秒）**；`0` 关闭每包日志，负数不限（仅调试，低配机器慎用） |
 
 子命令：`start`、`rules list|stats|add|del`、`conns list`、`reload`、`test`（详见 `main.go`）。
+
+---
+
+## 🩺 稳定性：低配机器为什么会「连不上」
+
+线上曾反复出现的症状：ping 通、22 / 18081 端口能连，但 SSH 拿不到 banner、网页一个字节不回；内核日志里**没有** OOM / hung task，journald 出现时间戳倒挂，systemd 反复报 `gofw.service: Failed with result 'timeout'`。这是**用户态被日志 IO 拖死**，不是进程崩溃，也不是内存爆掉（2 GB 内存当时还有富余）。
+
+实测确认的根因链条：
+
+1. AF_PACKET 把网卡置为混杂模式，抓到的是整个网段的包（含 ARP / 广播 / 非本机流量）；
+2. `MonitorEnforcer.OnDecision` 对**每一个包**都 `log.Printf` 一行；
+3. `--log-file` 用 `io.MultiWriter(os.Stderr, file)`，每行同时写 systemd journal 与日志文件，**双写**；
+4. Web 页面每 5 秒轮询多个 API，自己就在制造包；超时重试又制造更多包 → 正反馈；
+5. journal 无上限（实测涨到 **1.0 G**）、`gofw.log` 无轮转（22 MiB / 13.4 万行一直追加），峰值约 53 行/秒 × 双写。
+
+低流量时系统完全正常（CPU 90% 空闲），所以表现为「用着用着突然卡死」，而不是稳定可复现的崩溃。
+
+已落地的防护（均已在线验证）：
+
+| 措施 | 位置 | 效果 |
+| :--- | :--- | :--- |
+| 每包决策日志固定窗口限速 | `enforce/decisionlog.go`、`--log-packet-rate 20` | 统计 / 告警 / 错误 / 审计日志不受影响；被抑制行数在 `stats:` 的 `log_suppressed=` 如实汇总 |
+| gofw.log 轮转 | `/etc/logrotate.d/gofw`（daily / 50 MiB / 7 份 / copytruncate） | 强制轮转实测：22 MiB 归档、进程继续写入、页面 200 |
+| journal 上限 | `/etc/systemd/journald.conf` 的 `SystemMaxUse=300M` | 占用从 1.0 G 降到 320 M |
+
+压测验证：并发 80 次 API 请求（711 个包）期间只写出约 100 行、`log_suppressed=611`，页面 0.03s 响应、负载 0.41、无 service timeout。
+
+> 需要全量包日志做调试时用 `--log-packet-rate -1`，但**不要在低配 VM 上长期开**，否则会重现上述 IO 打满。精确的包数 / 拦截数始终由 `/api/stats` 与审计日志保留，不依赖日志流水。
 
 ---
 
@@ -294,6 +324,7 @@ node -e "const fs=require('fs');const h=fs.readFileSync('webui/index.html','utf8
 - **城市 / ASN 规则与内核**：nftables 无法表达城市/ASN 匹配，带这两个条件的规则整条跳过内核下发，只在用户态决策层生效（避免退化成裸 drop 误伤全网）。
 - **per-src 并发连接限制在内核侧降级**：目标机 nftables v1.0.2 内核不支持动态集 / meter 与 `ct count over N` 组合（`nft -c -f` 报 `Operation not supported`）。因此 `per_src: true` 的并发连接限制下发内核时降级为**全局** `ct state new ct count over N drop`，预检结果会以 `!` 明确列出，不会把「每源 N」悄悄冒充成原语义。速率 / 带宽限制的 per-src 仍由 nft meter 动态集实现真实的每源独立计数；meter 语法（必须带集合名、`drop` 必须在花括号外）已在目标机实测并全量校验通过。
 - **DPI 在用户态**：用于识别与统计，不是内核线速过滤。
+- **每包日志默认限速 20 行/秒**：为防止日志 IO 拖死低配机器（见「稳定性」章节），流水日志会按速率采样，被省略的行数在 `log_suppressed` 里汇总。精确计数看 `/api/stats`，不靠日志流水；需要全量时用 `--log-packet-rate -1`。
 - **Web 认证默认关闭**：可一键启用并持久化，但不会擅自强制开启——否则现有自动化脚本与未登录页面会被立刻挡住。
 - **eBPF / XDP 明确不做**：本项目硬约束是纯 Go、零 CGO、仅 `yaml.v3` 依赖、单二进制、`AF_PACKET` 用户态抓包。XDP 需要 `github.com/cilium/ebpf` 依赖、内核 BTF、clang 生成的 BPF 字节码或特权加载器，等于重写整个数据面，也会破坏低配 VM 上「一个二进制跑起来」的前提。这不是遗漏，是不在架构目标内；真要线速过滤的正确路径是直接用 nftables 内核后端（已具备）。
 

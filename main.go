@@ -77,6 +77,7 @@ func usage() {
                             [--gateway] [--web :8080] [--ha ha.yaml] [--alert alert.yaml]
                             [--audit-file PATH] [--web-auth-file PATH] [--sync-secret SECRET]
                             [--geoip-reload-interval N] [--auto-ban] [--ban-safe-cidr CIDRS]
+                            [--log-packet-rate N]
   gofw rules list -r rules.yaml
   gofw rules stats [--ctl-sock PATH]
   gofw rules add -r rules.yaml <action> [--src-ip CIDR] [--dst-ip CIDR] [-p proto] [--src-port P] [--dst-port P] [--tcp-flags f] [--direction in|out] [--state s] [--comment "x"] [--conn-limit N] [--bandwidth Mbps] [--geoip CN,US]
@@ -99,6 +100,7 @@ func cmdStart(args []string) int {
 	keepRules := fs.bool("", "keep-rules", false)
 	ctlSock := fs.string("", "ctl-sock", "/tmp/gofw.sock")
 	logFile := fs.string("", "log-file", "")
+	logPacketRate := fs.int("", "log-packet-rate", 20) // 每包决策日志限速（行/秒，0=关，<0=不限）
 	gateway := fs.bool("", "gateway", false)
 	webAddr := fs.string("", "web", "")                           // Web 管理界面监听地址
 	haConfig := fs.string("", "ha", "")                           // HA 配置文件
@@ -130,6 +132,8 @@ func cmdStart(args []string) int {
 		}
 		log.SetOutput(io.MultiWriter(os.Stderr, f))
 	}
+	enforce.SetDecisionLogRate(logPacketRate)
+	log.Printf("decision log rate: %d lines/s (0=off, <0=unlimited)", logPacketRate)
 
 	rs, err := config.Load(rulesFile)
 	if err != nil {
@@ -432,8 +436,9 @@ func cmdStart(args []string) int {
 				droppedPerSec := dropped - lastDropped
 				lastDropped = dropped
 				if statsInterval > 0 {
-					log.Printf("stats: pkts=%v accepted=%v dropped=%v conns=%v",
-						s["packets"], s["accepted"], s["dropped"], s["connections"])
+					log.Printf("stats: pkts=%v accepted=%v dropped=%v conns=%v log_suppressed=%v",
+						s["packets"], s["accepted"], s["dropped"], s["connections"],
+						enforce.SuppressedDecisionLogs())
 				}
 				if alertMgr != nil {
 					alertMgr.CheckDropRate(int64(droppedPerSec))
