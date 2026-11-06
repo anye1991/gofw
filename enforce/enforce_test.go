@@ -1,6 +1,7 @@
 package enforce
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -220,9 +221,12 @@ func TestRuleLimitStmtsRatePerSrc(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 limit stmt, got %d: %v", len(got), got)
 	}
-	want := "tcp dport 22 meter size 65535 { ip saddr timeout 1m limit rate over 5/second burst 10 packets drop }"
+	want := "tcp dport 22 meter gofw_meter_1 size 65535 { ip saddr timeout 1m limit rate over 5/second burst 10 packets } drop"
 	if got[0] != want {
 		t.Errorf("per-src rate limit mismatch:\n got: %q\nwant: %q", got[0], want)
+	}
+	if notes := n.DegradationNotes(); len(notes) != 0 {
+		t.Errorf("rate limit must not be degraded, got %v", notes)
 	}
 }
 
@@ -242,7 +246,8 @@ func TestRuleLimitStmtsRateGlobal(t *testing.T) {
 	}
 }
 
-// 并发连接数限制（按源）：应生成 ct state new + ct count over N + meter 的"超限丢弃"语句。
+// 并发连接数限制（按源）：nft v1.0.2 内核不支持 meter/set + ct count，
+// 必须显式降级为全局 ct count 并通过 DegradationNotes 告知，绝不生成非法语句。
 func TestRuleLimitStmtsConnPerSrc(t *testing.T) {
 	proto := uint8(6)
 	r := rules.NewRule(rules.ActionAccept)
@@ -255,9 +260,62 @@ func TestRuleLimitStmtsConnPerSrc(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 stmt, got %v", got)
 	}
-	want := "tcp dport { 80, 443 } meter size 65535 { ip saddr timeout 1m ct state new ct count over 200 drop }"
+	want := "tcp dport { 80, 443 } ct state new ct count over 200 drop"
 	if got[0] != want {
-		t.Errorf("per-src conn limit mismatch:\n got: %q\nwant: %q", got[0], want)
+		t.Errorf("degraded per-src conn limit mismatch:\n got: %q\nwant: %q", got[0], want)
+	}
+	if strings.Contains(got[0], "meter") {
+		t.Errorf("degraded conn limit must not contain meter: %q", got[0])
+	}
+	if notes := n.DegradationNotes(); len(notes) == 0 {
+		t.Error("conn limit degradation must be reported via DegradationNotes")
+	}
+}
+
+// nft v1.0.2 语法回归：meter 必须带唯一集合名、drop 必须在花括号外。
+// 旧实现生成 `meter size 65535 { ... drop }`，nft -c -f 直接报语法错误，
+// 导致整套规则集无法下发内核（全量预检才暴露）。
+func TestBuildScriptMeterSyntax(t *testing.T) {
+	rs := rules.NewRuleSet()
+	rs.DefaultAction = rules.ActionAccept
+	for i := 0; i < 3; i++ {
+		proto := uint8(6)
+		r := rules.NewRule(rules.ActionAccept)
+		r.Protocol = &proto
+		r.DstPort = rules.ParsePortSpec(fmt.Sprintf("%d", 1000+i))
+		r.Direction = rules.DirIn
+		r.RateLimit = rules.ParseRateLimit(5, 10, true)
+		rs.Add(r)
+	}
+	n := &NftablesEnforcer{}
+	script := n.buildScript(rs)
+	if strings.Contains(script, "meter size") {
+		t.Errorf("meter without a set name is invalid on nft v1.0.2:\n%s", script)
+	}
+	if strings.Contains(script, " drop }") {
+		t.Errorf("verdict must be outside the meter braces:\n%s", script)
+	}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(script, "\n") {
+		if !strings.Contains(line, "meter ") {
+			continue
+		}
+		if !strings.HasSuffix(strings.TrimSpace(line), "} drop") {
+			t.Errorf("meter stmt must end with '} drop': %q", line)
+		}
+		idx := strings.Index(line, "meter ")
+		rest := line[idx+len("meter "):]
+		name := strings.SplitN(rest, " ", 2)[0]
+		if !strings.HasPrefix(name, "gofw_meter_") {
+			t.Errorf("unexpected meter name %q", name)
+		}
+		if seen[name] {
+			t.Errorf("duplicate meter name %q in one script:\n%s", name, script)
+		}
+		seen[name] = true
+	}
+	if len(seen) < 3 {
+		t.Errorf("expected at least 3 distinct meters, got %d", len(seen))
 	}
 }
 
@@ -287,7 +345,7 @@ func TestBuildScriptRateOrderBeforeAccept(t *testing.T) {
 	n := &NftablesEnforcer{}
 	script := n.buildScript(rs)
 	t.Log(script)
-	iLimit := strings.Index(script, "limit rate over 5/second burst 10 packets drop")
+	iLimit := strings.Index(script, "limit rate over 5/second burst 10 packets } drop")
 	iAccept := strings.Index(script, "tcp dport 22 accept")
 	if iLimit < 0 || iAccept < 0 {
 		t.Fatalf("expected both limit and accept in script:\n%s", script)
@@ -379,6 +437,7 @@ func TestGeoIPMissingDataNotBareAction(t *testing.T) {
 		}
 	}
 }
+
 // 生产规则(deploy/rules-prod.yaml)必须能被完整加载并编译出全部关键内核语句：
 // 每源限速、并发限制、ICMP flood 限速、NULL 扫描、GeoIP 国家拦截等。
 func TestBuildScriptProdRules(t *testing.T) {
@@ -391,12 +450,12 @@ func TestBuildScriptProdRules(t *testing.T) {
 	script := n.buildScript(rs)
 	t.Log(script)
 	for _, want := range []string{
-		// SSH 每源限速（内核 meter + limit rate over）
-		"meter size 65535 { ip saddr timeout 1m limit rate over 5/second burst 10 packets drop }",
-		// Web 每源并发限制（内核 ct count over）
+		// SSH 每源限速（meter 带唯一集合名，drop 在花括号外）
+		"limit rate over 5/second burst 10 packets } drop",
+		// Web 每源并发限制：内核不支持 per-src ct count，降级为全局计数
 		"ct state new ct count over 200 drop",
 		// ICMP flood 每源限速
-		"limit rate over 50/second burst 100 packets drop",
+		"limit rate over 50/second burst 100 packets } drop",
 		// NULL 扫描
 		"== (0) drop",
 		// GeoIP 俄罗斯拦截
@@ -409,4 +468,3 @@ func TestBuildScriptProdRules(t *testing.T) {
 		}
 	}
 }
-

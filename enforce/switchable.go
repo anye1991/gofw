@@ -127,6 +127,9 @@ func (s *Switchable) Preflight() (ok bool, detail string) {
 		return false, sb.String()
 	}
 	pass("规则集 nft -c -f 语法校验：通过（%d 条规则，default=%s）", rs.Len(), rs.DefaultAction)
+	for _, note := range nft.DegradationNotes() {
+		sb.WriteString("! " + note + "\n")
+	}
 
 	sb.WriteString("→ 可以切换。切换后 30 秒内若未点「确认保留」，会自动回滚到 monitor。")
 	return true, sb.String()
