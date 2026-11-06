@@ -74,6 +74,31 @@ func dedup(in []string) []string {
 	return out
 }
 
+// HasMeta 报告当前库是否带城市 / ASN 扩展列。
+// 两列的 Country Lite 库返回 false，此时城市 / ASN 级规则不会误命中任何包。
+func (db *DB) HasMeta() bool {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	return len(db.meta) > 0
+}
+
+// MetaSummary 返回扩展列覆盖情况：不同城市数、不同 ASN 数，以及是否已加载。
+// 用于能力中心如实展示「国家/地区级」还是「城市 / ASN 级」，不臆造精度。
+func (db *DB) MetaSummary() (cities, asns int, loaded bool) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	citySet, asnSet := map[string]bool{}, map[string]bool{}
+	for _, m := range db.meta {
+		if m.City != "" {
+			citySet[m.City] = true
+		}
+		if m.ASN != "" {
+			asnSet[m.ASN] = true
+		}
+	}
+	return len(citySet), len(asnSet), db.loaded
+}
+
 // LookupFull 查询 IP 的国家码，以及库中可选的城市 / ASN 元数据。
 // 供城市级、ASN/运营商级策略接入使用；库为两列时后两项为空。
 func (db *DB) LookupFull(ip net.IP) (country, city, asn string) {

@@ -670,7 +670,9 @@ type Rule struct {
 	RateLimit    *RateLimit
 	Bandwidth    *BandwidthLimit // 带宽限速（字节/秒）
 	ConnLimit    *ConnLimit      // 并发连接数限制
-	GeoIP        *GeoIPSpec      // 地理位置匹配
+	GeoIP        *GeoIPSpec      // 地理位置匹配（国家码）
+	GeoCity      string          // 城市级匹配（逗号分隔，! 取反，支持尾通配 *）
+	GeoASN       string          // ASN / 运营商级匹配（同上）
 	AppProto     string          // 应用层协议（DPI），如 http/dns/tls
 	IPGroup      string          // 引用地址簿名称
 	NAT          *NATSpec
@@ -743,6 +745,8 @@ type MatchContext struct {
 	Now              time.Time
 	PacketLen        int    // 用于命中字节统计
 	SrcCountry       string // 源 IP 国家码（GeoIP）
+	City             string // 源 IP 城市（GeoIP 扩展列，两列库为空）
+	ASN              string // 源 IP ASN / 运营商（GeoIP 扩展列，两列库为空）
 	AppProto         string // 应用层协议（DPI 识别）
 }
 
@@ -793,10 +797,49 @@ func (r *Rule) Match(c MatchContext) bool {
 	if r.GeoIP != nil && !r.GeoIP.Matches(c.SrcCountry) {
 		return false
 	}
+	// 城市 / ASN 级策略：库无扩展列时 c.City / c.ASN 为空，
+	// 非取反规则不会误命中；取反规则会命中未知归属包，语义与 GeoIP deny 一致。
+	if !MatchStringList(r.GeoCity, c.City) {
+		return false
+	}
+	if !MatchStringList(r.GeoASN, c.ASN) {
+		return false
+	}
 	if r.AppProto != "" && r.AppProto != c.AppProto {
 		return false
 	}
 	return true
+}
+
+// MatchStringList 匹配逗号分隔的字符串条件。
+// 空条件 = 不限制；"!" 前缀取反；"*" 通配全部；尾随 * 做前缀匹配；大小写不敏感。
+// 用于城市 / ASN / 运营商这类文本型归属字段，避免与 GeoIPSpec 的国家码语义混淆。
+func MatchStringList(spec, value string) bool {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return true
+	}
+	negate := false
+	if strings.HasPrefix(spec, "!") {
+		negate = true
+		spec = strings.TrimSpace(spec[1:])
+	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	hit := false
+	for _, item := range strings.Split(spec, ",") {
+		item = strings.ToLower(strings.TrimSpace(item))
+		if item == "" {
+			continue
+		}
+		if item == "*" || (strings.HasSuffix(item, "*") && strings.HasPrefix(value, strings.TrimSuffix(item, "*"))) || value == item {
+			hit = true
+			break
+		}
+	}
+	if negate {
+		return !hit
+	}
+	return hit
 }
 
 // HitCount 返回命中次数。
@@ -848,6 +891,12 @@ func (r *Rule) String() string {
 		if s := r.GeoIP.String(); s != "" {
 			parts = append(parts, "geoip="+s)
 		}
+	}
+	if r.GeoCity != "" {
+		parts = append(parts, "geo_city="+r.GeoCity)
+	}
+	if r.GeoASN != "" {
+		parts = append(parts, "geo_asn="+r.GeoASN)
 	}
 	if r.AppProto != "" {
 		parts = append(parts, "app="+r.AppProto)

@@ -86,11 +86,11 @@ func buildGuardRules(g guardProfile) []*rules.Rule {
 
 // geoApplyRequest 一键预设请求。
 type geoApplyRequest struct {
-	Preset    string        `json:"preset"` // blacklist / whitelist / ports / clear
-	Countries []string      `json:"countries"`
-	Ports     string        `json:"ports"` // 仅作用于这些目的端口（preset=ports 或选填）
-	Direction string        `json:"direction"`
-	Guard     guardProfile  `json:"guard"`
+	Preset    string       `json:"preset"` // blacklist / whitelist / ports / clear
+	Countries []string     `json:"countries"`
+	Ports     string       `json:"ports"` // 仅作用于这些目的端口（preset=ports 或选填）
+	Direction string       `json:"direction"`
+	Guard     guardProfile `json:"guard"`
 }
 
 func (q geoApplyRequest) normalized() geoApplyRequest {
@@ -159,9 +159,11 @@ func (s *Server) geoStatus(w http.ResponseWriter) {
 		}
 	}
 
-	mode := s.backend
-	if mode == "" {
-		mode = "monitor"
+	mode := "monitor"
+	if s.backendCtl != nil {
+		mode = s.backendCtl.Mode()
+	} else if s.backend != "" {
+		mode = s.backend
 	}
 
 	writeJSON(w, map[string]interface{}{
@@ -193,8 +195,14 @@ func (s *Server) geoApply(w http.ResponseWriter, r *http.Request) {
 		s.geoClear(w)
 		return
 	}
+	// guard：只安装防锁死护栏、不生成任何 DROP 规则。
+	// 这是切换内核真实丢包前的强制前置条件，也适合单独用来做「安全底線」。
+	if q.Preset == "guard" {
+		s.geoInstallGuard(w, q)
+		return
+	}
 	if q.Preset != "blacklist" && q.Preset != "whitelist" && q.Preset != "ports" {
-		writeError(w, http.StatusBadRequest, "preset must be blacklist / whitelist / ports / clear")
+		writeError(w, http.StatusBadRequest, "preset must be blacklist / whitelist / ports / guard / clear")
 		return
 	}
 	if len(q.Countries) == 0 {
@@ -272,11 +280,41 @@ func (s *Server) geoApply(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.alog("geofence", "应用地理围栏预设 "+q.Preset, map[string]interface{}{"countries": q.Countries, "ports": q.Ports, "guards": len(guard), "rules": newRS.Len()})
 	writeJSON(w, map[string]interface{}{
 		"status": "applied", "preset": q.Preset,
 		"countries": q.Countries, "ports": q.Ports,
 		"guards": len(guard), "rules": newRS.Len(),
 		"note": "防锁死护栏已强制前置；管理端口与 LAN 网段保持放行",
+	})
+}
+
+// geoInstallGuard 只写 4 条护栏 ACCEPT、清除所有地理封锁规则，不影响任何业务流量。
+// 切换内核后端前必须先执行它：否则白名单 / 黑名单可能把 SSH 与 18081 一起挡掉。
+func (s *Server) geoInstallGuard(w http.ResponseWriter, q geoApplyRequest) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	newRS := s.cloneRuleset()
+	kept := make([]*rules.Rule, 0, len(newRS.Rules))
+	for _, rl := range newRS.Rules {
+		if !isManaged(rl) {
+			kept = append(kept, rl)
+		}
+	}
+	guard := buildGuardRules(q.Guard)
+	merged := make([]*rules.Rule, 0, len(guard)+len(kept))
+	merged = append(merged, guard...)
+	merged = append(merged, kept...)
+	newRS.Rules = merged
+	if err := s.commit(newRS); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.alog("geofence", "安装防锁死护栏（无封锁规则）", map[string]interface{}{"guards": len(guard), "rules": newRS.Len()})
+	writeJSON(w, map[string]interface{}{
+		"status": "applied", "preset": "guard",
+		"guards": len(guard), "rules": newRS.Len(),
+		"note": "仅安装护栏，未生成任何 DROP；现在可以预检并切换内核后端",
 	})
 }
 
@@ -295,6 +333,7 @@ func (s *Server) geoClear(w http.ResponseWriter) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.alog("geofence", "清空地理围栏，恢复原始规则集", map[string]interface{}{"rules": newRS.Len()})
 	writeJSON(w, map[string]interface{}{"status": "cleared", "rules": newRS.Len()})
 }
 
@@ -342,6 +381,7 @@ func (s *Server) handleGeoReload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "reload failed: "+err.Error())
 		return
 	}
+	s.alog("geoip", "手动热加载 GeoIP 库", map[string]interface{}{"entries": n})
 	writeJSON(w, map[string]interface{}{"status": "reloaded", "count": n})
 }
 
@@ -359,11 +399,11 @@ func (s *Server) handleBans(w http.ResponseWriter, r *http.Request) {
 		})
 	case http.MethodPost:
 		var body struct {
-			Action  string          `json:"action"` // add / unban / config
-			IP      string          `json:"ip"`
-			TTL     int             `json:"ttl"`
-			Config  *geoctl.Config  `json:"config"`
-			Country string          `json:"country"`
+			Action  string         `json:"action"` // add / unban / config
+			IP      string         `json:"ip"`
+			TTL     int            `json:"ttl"`
+			Config  *geoctl.Config `json:"config"`
+			Country string         `json:"country"`
 		}
 		if err := jsonDecode(r, &body); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid json")
@@ -376,9 +416,11 @@ func (s *Server) handleBans(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
+			s.alog("ban", "手动封禁 "+body.IP, map[string]interface{}{"ttl": body.TTL, "country": body.Country})
 			writeJSON(w, map[string]interface{}{"status": "banned", "ban": b})
 		case "unban":
 			ok := s.geoCtl.Unban(body.IP)
+			s.alog("ban", "解封 "+body.IP, map[string]interface{}{"removed": ok})
 			writeJSON(w, map[string]interface{}{"status": "ok", "removed": ok})
 		case "config":
 			if body.Config == nil {
@@ -386,6 +428,7 @@ func (s *Server) handleBans(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			cfg := s.geoCtl.SetConfig(*body.Config)
+			s.alog("ban", "更新自动封禁配置", map[string]interface{}{"enabled": cfg.Enabled, "threshold": cfg.Threshold})
 			writeJSON(w, map[string]interface{}{"status": "ok", "config": cfg})
 		default:
 			writeError(w, http.StatusBadRequest, "action must be add / unban / config")

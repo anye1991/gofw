@@ -40,6 +40,8 @@ type rawRule struct {
 	BurstBytes int64       `yaml:"burst_bytes" json:"burst_bytes"`
 	ConnLimit  int         `yaml:"conn_limit" json:"conn_limit"`
 	GeoIP      string      `yaml:"geoip" json:"geoip"`
+	GeoCity    string      `yaml:"geo_city" json:"geo_city"`
+	GeoASN     string      `yaml:"geo_asn" json:"geo_asn"`
 	AppProto   string      `yaml:"app_proto" json:"app_proto"`
 	IPGroup    string      `yaml:"ip_group" json:"ip_group"`
 	NAT        *rawNAT     `yaml:"nat" json:"nat"`
@@ -164,6 +166,8 @@ func (r rawRule) toRule() (*rules.Rule, error) {
 	if r.GeoIP != "" {
 		rule.GeoIP = rules.ParseGeoIPSpec(r.GeoIP)
 	}
+	rule.GeoCity = strings.TrimSpace(r.GeoCity)
+	rule.GeoASN = strings.TrimSpace(r.GeoASN)
 	if r.AppProto != "" {
 		rule.AppProto = strings.ToLower(strings.TrimSpace(r.AppProto))
 	}
@@ -313,32 +317,34 @@ func Save(rs *rules.RuleSet, path string) error {
 		ToDstPort uint16 `yaml:"to_dst_port,omitempty"`
 	}
 	type outRule struct {
-		Action       string   `yaml:"action"`
-		SrcIP        string   `yaml:"src_ip,omitempty"`
-		DstIP        string   `yaml:"dst_ip,omitempty"`
-		SrcMAC       string   `yaml:"src_mac,omitempty"`
-		DstMAC       string   `yaml:"dst_mac,omitempty"`
-		Protocol     string   `yaml:"protocol,omitempty"`
-		SrcPort      string   `yaml:"src_port,omitempty"`
-		DstPort      string   `yaml:"dst_port,omitempty"`
-		TCPFlags     string   `yaml:"tcp_flags,omitempty"`
-		TCPFlagsMask string   `yaml:"tcp_flags_mask,omitempty"`
-		Direction    string   `yaml:"direction,omitempty"`
-		State        string   `yaml:"state,omitempty"`
-		VLAN         int      `yaml:"vlan,omitempty"`
-		Time         string   `yaml:"time,omitempty"`
-		RateLimit    int      `yaml:"rate_limit,omitempty"`
-		Burst        int      `yaml:"burst,omitempty"`
-		Bandwidth    float64  `yaml:"bandwidth,omitempty"`
-		BurstBytes   int64    `yaml:"burst_bytes,omitempty"`
-		ConnLimit    int      `yaml:"conn_limit,omitempty"`
-		PerSrc       bool     `yaml:"per_src,omitempty"`
-		GeoIP        string   `yaml:"geoip,omitempty"`
-		AppProto     string   `yaml:"app_proto,omitempty"`
-		IPGroup      string   `yaml:"ip_group,omitempty"`
-		NAT          *outNAT  `yaml:"nat,omitempty"`
-		Comment      string   `yaml:"comment,omitempty"`
-		Name         string   `yaml:"name,omitempty"`
+		Action       string  `yaml:"action"`
+		SrcIP        string  `yaml:"src_ip,omitempty"`
+		DstIP        string  `yaml:"dst_ip,omitempty"`
+		SrcMAC       string  `yaml:"src_mac,omitempty"`
+		DstMAC       string  `yaml:"dst_mac,omitempty"`
+		Protocol     string  `yaml:"protocol,omitempty"`
+		SrcPort      string  `yaml:"src_port,omitempty"`
+		DstPort      string  `yaml:"dst_port,omitempty"`
+		TCPFlags     string  `yaml:"tcp_flags,omitempty"`
+		TCPFlagsMask string  `yaml:"tcp_flags_mask,omitempty"`
+		Direction    string  `yaml:"direction,omitempty"`
+		State        string  `yaml:"state,omitempty"`
+		VLAN         int     `yaml:"vlan,omitempty"`
+		Time         string  `yaml:"time,omitempty"`
+		RateLimit    int     `yaml:"rate_limit,omitempty"`
+		Burst        int     `yaml:"burst,omitempty"`
+		Bandwidth    float64 `yaml:"bandwidth,omitempty"`
+		BurstBytes   int64   `yaml:"burst_bytes,omitempty"`
+		ConnLimit    int     `yaml:"conn_limit,omitempty"`
+		PerSrc       bool    `yaml:"per_src,omitempty"`
+		GeoIP        string  `yaml:"geoip,omitempty"`
+		GeoCity      string  `yaml:"geo_city,omitempty"`
+		GeoASN       string  `yaml:"geo_asn,omitempty"`
+		AppProto     string  `yaml:"app_proto,omitempty"`
+		IPGroup      string  `yaml:"ip_group,omitempty"`
+		NAT          *outNAT `yaml:"nat,omitempty"`
+		Comment      string  `yaml:"comment,omitempty"`
+		Name         string  `yaml:"name,omitempty"`
 	}
 	out := struct {
 		Default  string            `yaml:"default"`
@@ -413,6 +419,8 @@ func Save(rs *rules.RuleSet, path string) error {
 		if r.GeoIP != nil {
 			or.GeoIP = r.GeoIP.String()
 		}
+		or.GeoCity = r.GeoCity
+		or.GeoASN = r.GeoASN
 		if r.AppProto != "" {
 			or.AppProto = r.AppProto
 		}

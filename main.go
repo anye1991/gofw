@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"gofw/alert"
+	"gofw/audit"
 	"gofw/capture"
 	"gofw/config"
 	"gofw/enforce"
@@ -74,6 +75,8 @@ func usage() {
 用法:
   gofw start -r rules.yaml [-i eth0] [--monitor] [--workers N] [--stats-interval N] [--ctl-sock PATH]
                             [--gateway] [--web :8080] [--ha ha.yaml] [--alert alert.yaml]
+                            [--audit-file PATH] [--web-auth-file PATH] [--sync-secret SECRET]
+                            [--geoip-reload-interval N] [--auto-ban] [--ban-safe-cidr CIDRS]
   gofw rules list -r rules.yaml
   gofw rules stats [--ctl-sock PATH]
   gofw rules add -r rules.yaml <action> [--src-ip CIDR] [--dst-ip CIDR] [-p proto] [--src-port P] [--dst-port P] [--tcp-flags f] [--direction in|out] [--state s] [--comment "x"] [--conn-limit N] [--bandwidth Mbps] [--geoip CN,US]
@@ -97,15 +100,21 @@ func cmdStart(args []string) int {
 	ctlSock := fs.string("", "ctl-sock", "/tmp/gofw.sock")
 	logFile := fs.string("", "log-file", "")
 	gateway := fs.bool("", "gateway", false)
-	webAddr := fs.string("", "web", "")       // Web 管理界面监听地址
-	haConfig := fs.string("", "ha", "")       // HA 配置文件
-	alertConfig := fs.string("", "alert", "") // 告警配置文件
+	webAddr := fs.string("", "web", "")                           // Web 管理界面监听地址
+	haConfig := fs.string("", "ha", "")                           // HA 配置文件
+	alertConfig := fs.string("", "alert", "")                     // 告警配置文件
 	geoReloadInterval := fs.float("", "geoip-reload-interval", 0) // GeoIP 库热更新检查间隔（秒，0=关闭）
-	autoBanEnabled := fs.bool("", "auto-ban", false)               // 临时自动封禁总开关
-	banThreshold := fs.int("", "ban-threshold", 20)                // 窗口内 DROP 次数阈值
-	banWindow := fs.int("", "ban-window", 10)                      // 统计窗口（秒）
-	banTTL := fs.int("", "ban-ttl", 300)                           // 封禁时长（秒）
-	banSafeCIDR := fs.string("", "ban-safe-cidr", "")              // 额外永不封禁网段（逗号分隔）
+	autoBanEnabled := fs.bool("", "auto-ban", false)              // 临时自动封禁总开关
+	banThreshold := fs.int("", "ban-threshold", 20)               // 窗口内 DROP 次数阈值
+	banWindow := fs.int("", "ban-window", 10)                     // 统计窗口（秒）
+	banTTL := fs.int("", "ban-ttl", 300)                          // 封禁时长（秒）
+	banSafeCIDR := fs.string("", "ban-safe-cidr", "")             // 额外永不封禁网段（逗号分隔）
+	auditFile := fs.string("", "audit-file", "")                  // 审计日志文件
+	syncSecret := fs.string("", "sync-secret", "")                // 多机策略同步签名密钥
+	webAuthFile := fs.string("", "web-auth-file", "")             // Web 登录密码持久化文件
+	if syncSecret == "" {
+		syncSecret = os.Getenv("GOFW_SYNC_SECRET")
+	}
 
 	if rulesFile == "" {
 		fmt.Fprintln(os.Stderr, "error: -r rules.yaml is required")
@@ -208,23 +217,43 @@ func cmdStart(args []string) int {
 		}
 	}
 
-	enf := enforce.BuildEnforcer(!monitor)
-	isKernel := false
-	if g, ok := enf.(*enforce.NftablesEnforcer); ok {
-		isKernel = true
+	// 执行后端：包装成运行时可切换，支持页面一键切 monitor <-> nftables，
+	// 带护栏自检和 30 秒自动回滚，无需改 systemd / 重启 / 冒 SSH 锁死风险。
+	base := enforce.BuildEnforcer(!monitor)
+	if g, ok := base.(*enforce.NftablesEnforcer); ok {
 		if geoDB != nil {
 			g.SetGeoIP(geoDB)
 		}
-		// 动态封禁随规则热替换一起下发内核
 		g.SetBanProvider(tracker.ActiveBansSplit)
 	}
-	backend := "monitor"
-	if isKernel {
-		backend = "kernel"
-	}
+	enf := enforce.NewSwitchable(base, &rsPtr, geoDB, tracker.ActiveBansSplit, func(mode string) {
+		log.Printf("[backend] runtime mode changed to %s", mode)
+	})
 	if !enf.Apply(rs) {
 		log.Printf("failed to apply ruleset to enforcer")
 		return 1
+	}
+
+	// 审计日志：只记管理动作，按大小轮转，低配机器上不随包量增长。
+	auditPath := auditFile
+	if auditPath == "" {
+		auditPath = rulesFile + ".audit.jsonl"
+	}
+	webAuthPath := webAuthFile
+	if webAuthPath == "" {
+		webAuthPath = rulesFile + ".webauth"
+	}
+	auditLogger, err := audit.New(auditPath)
+	if err != nil {
+		log.Printf("warning: audit log disabled: %v", err)
+		auditLogger = nil
+	} else if auditLogger != nil {
+		log.Printf("audit log: %s", auditPath)
+	}
+	if auditLogger != nil {
+		auditLogger.Log("startup", "system", "gofw 启动", map[string]interface{}{
+			"backend": enf.Mode(), "rules": rs.Len(), "geoip": geoSource,
+		})
 	}
 
 	// 网关模式：启用 IP 转发
@@ -325,8 +354,10 @@ func cmdStart(args []string) int {
 	if webAddr != "" {
 		go func() {
 			srv := webui.New(&engPtr, &rsPtr, webAddr, rulesFile, applyRuleset)
-			srv.SetGeo(tracker, reloadGeo, geoPath, geoSource, backend)
-			log.Printf("web UI listening on %s (backend=%s, geoip=%s)", webAddr, backend, geoSource)
+			srv.SetGeo(tracker, reloadGeo, geoPath, geoSource, enf.Mode())
+			srv.SetExtensions(auditLogger, enf, syncSecret, webAuthPath)
+			log.Printf("web UI listening on %s (backend=%s, geoip=%s, audit=%v, auth_file=%s)",
+				webAddr, enf.Mode(), geoSource, auditLogger != nil, webAuthPath)
 			if err := srv.Start(); err != nil {
 				log.Printf("web UI error: %v", err)
 			}

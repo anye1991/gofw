@@ -162,6 +162,7 @@ textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;l
     <button class="nav-btn" data-sec="system"><span class="ic">◈</span> 能力中心</button>
     <button class="nav-btn" data-sec="geofence"><span class="ic">🌐</span> 地理围栏</button>
     <button class="nav-btn" data-sec="config"><span class="ic">{}</span> 配置源</button>
+    <button class="nav-btn" data-sec="enhance"><span class="ic">✦</span> 系统增强</button>
     <div class="side-foot">GoFW 防火墙 · v1.0.0</div>
   </aside>
 
@@ -358,6 +359,82 @@ textarea.yaml{height:420px;font-family:ui-monospace,monospace;font-size:12.5px;l
           </div>
         </div>
       </section>
+
+      <!-- 系统增强：把「代码就绪未启用」全部变成页面可操作 -->
+      <section class="section" id="sec-enhance">
+        <div class="panel" style="margin-bottom:14px;border-color:rgba(251,191,36,.35)">
+          <h2>① 执行后端：从「只记录」切到「真丢包」</h2>
+          <div class="sub">这是整套系统最后一道闸。先装护栏 → 预检 → 切换，规则才会真正写进内核 <code>table inet gofw</code>。切换后有 <b>30 秒自动回滚</b>：没点「确认保留」就自动退回监控模式，即使误挡了 SSH 也会自己恢复，不需要人能登进机器。</div>
+          <div id="enh-backend-state" class="hint" style="margin:10px 0;padding:10px 12px;border:1px solid rgba(255,255,255,.12);border-radius:8px">读取中…</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <div class="field" style="margin:0;flex:1;min-width:190px"><label>护栏：管理端口（自动放行）</label><input id="enh-guard-ports" value="22,888,18706,18081"></div>
+            <div class="field" style="margin:0;flex:1;min-width:190px"><label>护栏：管理网段（自动放行）</label><input id="enh-guard-lan" value="192.168.58.0/24"></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" onclick="enhInstallGuard()">① 仅安装护栏（不改流量）</button>
+            <button class="btn" onclick="enhPreflight()">② 预检（权限 / 语法 / 护栏）</button>
+            <button class="btn primary" onclick="enhSwitchKernel()">③ 切到内核真实拦截</button>
+            <button class="btn" onclick="enhConfirm()">确认保留</button>
+            <button class="btn danger" onclick="enhRollback()">立即回滚到 monitor</button>
+          </div>
+          <pre id="enh-preflight" class="hint" style="white-space:pre-wrap;margin-top:10px;padding:10px 12px;border:1px solid rgba(255,255,255,.12);border-radius:8px">点「预检」查看逐项结果</pre>
+          <div class="hint" id="enh-backend-hint"></div>
+        </div>
+
+        <div class="panel" style="margin-bottom:14px">
+          <h2>② Web 登录保护</h2>
+          <div class="sub">默认不强制，方便内网调试；代价是任何能访问 18081 的人都能改规则。启用后所有 <code>/api/*</code> 需要登录，密码以 0600 落盘，重启仍生效；启用时会自动给当前浏览器建立会话，不会把自己锁在外面。</div>
+          <div id="enh-auth-state" class="hint" style="margin:10px 0;padding:10px 12px;border:1px solid rgba(255,255,255,.12);border-radius:8px">读取中…</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+            <div class="field" style="margin:0;flex:1;min-width:220px"><label>自定义密码（留空 = 自动生成 20 位）</label><input id="enh-auth-pw" placeholder="留空自动生成"></div>
+            <button class="btn primary" onclick="enhAuth('enable')">启用登录保护</button>
+            <button class="btn" onclick="enhAuth('password')">修改密码</button>
+            <button class="btn danger" onclick="enhAuth('disable')">停用</button>
+          </div>
+          <div id="enh-auth-hint" class="hint"></div>
+        </div>
+
+        <div class="panel" style="margin-bottom:14px">
+          <h2>③ 审计日志（谁在什么时候改了什么）</h2>
+          <div class="sub">纯 Go JSONL 轮转文件，只记管理动作、不记包流水：单文件 8 MiB、最多 5 份，低配机器不会被日志撑爆。规则变更、围栏、封禁、登录、后端切换、策略导入全部留痕。</div>
+          <div id="enh-audit-state" class="hint">读取中…</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:10px 0">
+            <button class="btn" onclick="enhAudit()">刷新日志</button>
+            <select id="enh-audit-kind" onchange="enhAudit()">
+              <option value="">全部类型</option><option value="rules">规则变更</option>
+              <option value="geofence">地理围栏</option><option value="ban">封禁</option>
+              <option value="backend">后端切换</option><option value="auth">登录保护</option>
+              <option value="geoip">GeoIP 热加载</option><option value="sync">策略同步</option>
+              <option value="startup">启动</option>
+            </select>
+          </div>
+          <div id="enh-audit-table"></div>
+        </div>
+
+        <div class="panel" style="margin-bottom:14px">
+          <h2>④ GeoIP 精度与城市 / ASN 级策略</h2>
+          <div id="enh-meta-state" class="hint" style="margin-bottom:10px;padding:10px 12px;border:1px solid rgba(255,255,255,.12);border-radius:8px">读取中…</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+            <div class="field" style="margin:0;flex:1;min-width:220px"><label>查一个 IP 的真实归属</label><input id="enh-lookup-ip" placeholder="8.8.8.8"></div>
+            <button class="btn" onclick="enhLookup()">查询</button>
+          </div>
+          <div id="enh-lookup-result" class="hint" style="margin-bottom:10px"></div>
+          <div class="hint">规则字段 <code>geo_city</code> / <code>geo_asn</code> 已可用（逗号分隔、<code>!</code> 取反、尾 <code>*</code> 通配），可在「配置源」YAML 或规则 JSON 里写。<b>当前库是国家/地区级</b>，两列库没有城市/ASN 数据时这些条件不会误命中任何包；导入三/四列库后才真正生效。带这两个条件的规则只在用户态决策层匹配，内核模式会整条跳过下发，不会退化成无匹配器的裸 drop。</div>
+        </div>
+
+        <div class="panel">
+          <h2>⑤ 多机策略同步</h2>
+          <div class="sub">用 HMAC-SHA256 签名的策略包在多台机器间同步规则集，签名校验不通过一律拒绝应用。各节点需配置相同的 <code>--sync-secret</code>（或环境变量 <code>GOFW_SYNC_SECRET</code>）。</div>
+          <div id="enh-sync-state" class="hint" style="margin:10px 0">读取中…</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <button class="btn" onclick="enhExport()">导出策略包</button>
+            <button class="btn" onclick="enhCopyBundle()">复制策略包</button>
+          </div>
+          <textarea class="yaml" id="enh-sync-bundle" style="height:150px" placeholder="点「导出策略包」，或把对端整包 JSON 粘贴到这里再点「导入并应用」"></textarea>
+          <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end"><button class="btn primary" onclick="enhImport()">导入并应用</button></div>
+          <div id="enh-sync-hint" class="hint"></div>
+        </div>
+      </section>
     </div>
   </div>
 </div>
@@ -400,7 +477,8 @@ $('#pw') && document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&$('#log
 /* ---- 主循环 ---- */
 let last=null, seriesP=[], seriesD=[];
 function boot(){ setInterval(tick,2000); tick(); setInterval(liveTick,1000); liveTick(); setInterval(connTick,3000); connTick(); setInterval(sysTick,5000); sysTick();
-  setInterval(()=>{ const el=$('#sec-geofence'); if(el&&el.classList.contains('active')) geoStats(); },5000); }
+  setInterval(()=>{ const el=$('#sec-geofence'); if(el&&el.classList.contains('active')) geoStats(); },5000);
+  setInterval(()=>{ const el=$('#sec-enhance'); if(el&&el.classList.contains('active')) enhTick(); },5000); }
 async function tick(){
   const d=await jget('/api/stats');
   const e=d.engine;
@@ -663,7 +741,7 @@ function renderModeBanner(backend){
   el.style.borderColor=kernel?'rgba(52,211,153,.4)':'rgba(251,191,36,.45)';
   el.innerHTML= kernel
     ? '<b style="color:var(--green)">内核生效模式（nftables）</b>　规则已下发内核，会真实丢弃数据包；页面上的拦截数即实际丢包。'
-    : '<b style="color:var(--amber)">旁路监控模式（monitor）</b>　当前只记录决策 / 统计 / 日志，<b>不会真实丢包</b>：页面所有「拦截 / 丢弃」数字都是引擎判定，流量照常通过。地理围栏可配置、可预演，但要真正断网需去掉启动参数 <code>--monitor</code> 切到 nftables 后端（切换前确认护栏已放行管理通道）。';
+    : '<b style="color:var(--amber)">旁路监控模式（monitor）</b>　当前只记录决策 / 统计 / 日志，<b>不会真实丢包</b>：页面所有「拦截 / 丢弃」数字都是引擎判定，流量照常通过。要真正断网，到左侧「系统增强」页：先装护栏 → 预检 → 一键切到 nftables 内核后端，切换带 30 秒自动回滚保护。';
 }
 let sysBackend='monitor';
 async function sysTick(){
@@ -750,7 +828,7 @@ function geoBackendBanner(mode){
   if(mode==='kernel'){
     el.innerHTML='<div class="panel" style="border-color:rgba(52,211,153,.4);padding:12px 16px"><b style="color:var(--green)">内核生效模式（nftables）</b>　规则已下发内核，会真实丢弃数据包。地理围栏封锁会实际生效。</div>';
   }else{
-    el.innerHTML='<div class="panel" style="border-color:rgba(251,191,36,.45);padding:12px 16px"><b style="color:var(--amber)">旁路监控模式（monitor）＝ 先试跑，不误伤</b>　当前只记录决策 / 统计 / 日志，<b>不会真实丢包</b>。规则照常配置、预演照常算，但流量照常通过。<br>用法：下面 ① 选国家 → 看「预演」确认影响 → ③ 点黑名单 / 白名单生成规则 → 核对规则列表里护栏排在最前 → 最后去掉启动参数 <code>--monitor</code> 切到 nftables 内核后端，这一步才会真正断网（切换前务必确认护栏已放行管理通道与内网）。</div>';
+    el.innerHTML='<div class="panel" style="border-color:rgba(251,191,36,.45);padding:12px 16px"><b style="color:var(--amber)">旁路监控模式（monitor）＝ 先试跑，不误伤</b>　当前只记录决策 / 统计 / 日志，<b>不会真实丢包</b>。规则照常配置、预演照常算，但流量照常通过。<br>用法：下面 ① 选国家 → 看「预演」确认影响 → ③ 点黑名单 / 白名单生成规则 → 核对护栏排在最前 → 到左侧「系统增强」页预检后一键切到 nftables 内核后端，这一步才会真正断网（带 30 秒自动回滚，不会锁死 SSH）。</div>';
   }
 }
 async function geoStatus(){
@@ -840,8 +918,113 @@ async function banRemove(ipEnc){
 }
 function geoTick(){ geoStatus(); geoStats(); }
 
+/* ---- 系统增强 ---- */
+let enhBundle=null;
+function enhHint(id,msg,ok){ const el=$(id); if(!el)return; el.textContent=msg||''; el.style.color=ok===false?'var(--red)':(ok===true?'var(--green)':'var(--dim)'); }
+async function enhPost(path,body){
+  return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(body||{})});
+}
+async function enhTick(){
+  try{
+    const b=await jget('/api/backend');
+    const kernel=b.mode==='kernel';
+    $('#enh-backend-state').innerHTML = b.available
+      ? '当前执行后端：<b style="color:var(--'+(kernel?'green':'amber')+')">'+(kernel?'内核生效（nftables 真实丢包）':'旁路监控（只记录，不丢包）')+'</b>　· 护栏 <b>'+(b.guards||0)+'</b> 条　· 规则 <b>'+(b.rules||0)+'</b> 条　· 自动回滚剩余 <b>'+(b.rollback_remaining||0)+'</b> 秒'
+      : '运行时切换未装配：'+(b.note||'');
+  }catch(e){ $('#enh-backend-state').textContent='读取后端状态失败：'+(e&&e.message||e); }
+  try{
+    const a=await jget('/api/auth');
+    $('#enh-auth-state').innerHTML = a.enabled
+      ? '<b style="color:var(--green)">已启用</b>　密码来源：'+esc(a.source)+'　当前会话 '+esc(a.session_count||0)+' 个'
+      : '<b style="color:var(--amber)">未启用</b>　任何能访问 Web 端口的人都能修改防火墙规则';
+  }catch(e){ $('#enh-auth-state').textContent='读取认证状态失败：'+(e&&e.message||e); }
+  try{
+    const m=await jget('/api/geoip/meta');
+    $('#enh-meta-state').innerHTML = '当前精度：<b>'+esc(m.level||'country')+'</b>　· 城市 <b>'+fmt(m.cities||0)+'</b>　· ASN <b>'+fmt(m.asns||0)+'</b>　· 库已加载：<b>'+(m.loaded?'是':'否')+'</b><br>'+esc(m.note||'');
+  }catch(e){ $('#enh-meta-state').textContent='读取精度失败：'+(e&&e.message||e); }
+  try{
+    const s=await jget('/api/sync');
+    $('#enh-sync-state').innerHTML = s.enabled
+      ? '<b style="color:var(--green)">已配置同步密钥</b>　当前规则 <b>'+fmt(s.rules||0)+'</b> 条，导出的包带 HMAC-SHA256 签名'
+      : '<b style="color:var(--amber)">未配置密钥，导入被禁用</b>　'+esc(s.note||'');
+  }catch(e){ $('#enh-sync-state').textContent='读取同步状态失败：'+(e&&e.message||e); }
+  if($('#sec-enhance')&&$('#sec-enhance').classList.contains('active')) enhAudit();
+}
+async function enhInstallGuard(){
+  const body={preset:'guard',guard:{mgmt_ports:$('#enh-guard-ports').value,lan_cidr:$('#enh-guard-lan').value}};
+  const r=await enhPost('/api/geofence/apply',body); const j=await r.json().catch(()=>({}));
+  enhHint('#enh-backend-hint', r.ok?('护栏已安装：'+j.guards+' 条置顶，规则共 '+j.rules+' 条，未生成任何 DROP'):(j.error||'安装失败'), r.ok);
+  enhTick();
+}
+async function enhPreflight(){
+  const el=$('#enh-preflight'); el.textContent='预检中…';
+  const r=await enhPost('/api/backend/preflight',{}); const j=await r.json().catch(()=>({}));
+  el.textContent=j.detail||j.error||'无结果';
+  el.style.color=j.ok?'var(--green)':'var(--amber)';
+}
+async function enhSwitchKernel(){
+  if(!confirm('确认切换到 nftables 内核真实丢包？\n\n· 规则会真正丢弃数据包\n· 必须先装护栏并通过预检，否则后端会拒绝\n· 切换后 30 秒内必须点「确认保留」，否则自动回滚\n· 请确认 SSH(22) 与面板(18081) 在护栏放行范围内')) return;
+  const r=await enhPost('/api/backend/switch',{mode:'kernel',confirm:true}); const j=await r.json().catch(()=>({}));
+  enhHint('#enh-backend-hint', r.ok?'已切到内核模式，30 秒自动回滚已启动；请立刻验证 SSH 与面板可达，然后点「确认保留」':(j.error||'切换失败'), r.ok);
+  enhTick();
+}
+async function enhConfirm(){
+  const r=await enhPost('/api/backend/confirm',{}); const j=await r.json().catch(()=>({}));
+  enhHint('#enh-backend-hint', r.ok?'已确认保留，自动回滚已取消；当前 '+j.mode:'确认失败：'+(j.error||''), r.ok); enhTick();
+}
+async function enhRollback(){
+  if(!confirm('立即回滚到 monitor？内核 nftables 表会被清除，流量恢复全部放行。')) return;
+  const r=await enhPost('/api/backend/rollback',{}); const j=await r.json().catch(()=>({}));
+  enhHint('#enh-backend-hint', r.ok?'已回滚到监控模式，内核规则已清除':('回滚失败：'+(j.error||'')), r.ok); enhTick();
+}
+async function enhAuth(action){
+  const pw=$('#enh-auth-pw').value;
+  if(action==='disable'&&!confirm('停用登录保护后，任何能访问 Web 端口的人都能改规则。确认停用？')) return;
+  if(action==='password'&&!pw){ enhHint('#enh-auth-hint','修改密码需要先在输入框填写新密码（至少 8 位）',false); return; }
+  const r=await enhPost('/api/auth',{action:action,password:pw}); const j=await r.json().catch(()=>({}));
+  if(!r.ok){ enhHint('#enh-auth-hint',j.error||'操作失败',false); return; }
+  let msg='';
+  if(action==='enable'){ msg='已启用！请立刻保存密码：'+j.password+'（仅本次展示）'; $('#enh-auth-pw').value=j.password||''; }
+  else if(action==='password') msg='密码已修改，旧会话全部失效；当前浏览器已自动换成新会话';
+  else msg='已停用登录保护';
+  enhHint('#enh-auth-hint',msg,true); enhTick();
+}
+async function enhAudit(){
+  const kind=$('#enh-audit-kind')?$('#enh-audit-kind').value:'';
+  const r=await fetch('/api/audit?limit=100&kind='+encodeURIComponent(kind),{credentials:'same-origin'});
+  const j=await r.json().catch(()=>({})); const el=$('#enh-audit-table');
+  if(!el)return;
+  if(!j.enabled){ el.innerHTML='<div class="empty">审计日志未启用</div>'; $('#enh-audit-state').textContent='审计日志未启用'; return; }
+  $('#enh-audit-state').innerHTML='<b style="color:var(--green)">已启用</b>　文件：<span class="mono">'+esc(j.path||'')+'</span>　最近 '+fmt(j.count||0)+' 条';
+  const rows=(j.entries||[]).map(e=>'<tr><td class="mono">'+esc(e.time)+'</td><td>'+esc(e.kind)+'</td><td>'+esc(e.detail)+'</td><td class="mono">'+esc(e.fields?JSON.stringify(e.fields):'')+'</td></tr>').join('');
+  el.innerHTML=rows?'<table class="tbl"><thead><tr><th>时间</th><th>类型</th><th>动作</th><th>详情</th></tr></thead><tbody>'+rows+'</tbody></table>':'<div class="empty">暂无记录</div>';
+}
+async function enhLookup(){
+  const ip=$('#enh-lookup-ip').value.trim(); if(!ip){ enhHint('#enh-lookup-result','先填一个 IP',false); return; }
+  const r=await fetch('/api/geoip/lookup?ip='+encodeURIComponent(ip),{credentials:'same-origin'});
+  const j=await r.json().catch(()=>({}));
+  enhHint('#enh-lookup-result', r.ok?('IP '+j.ip+' → 国家 '+(j.country||'??')+' · 城市 '+(j.city||'（库无此列）')+' · ASN '+(j.asn||'（库无此列）')+' · 精度 '+j.precision):('查询失败：'+(j.error||'')), r.ok);
+}
+async function enhExport(){
+  const r=await fetch('/api/sync',{credentials:'same-origin'}); const j=await r.json().catch(()=>({}));
+  enhBundle=j; $('#enh-sync-bundle').value=JSON.stringify(j,null,2);
+  enhHint('#enh-sync-hint', j.enabled?('已导出：'+fmt(j.rules||0)+' 条规则，签名 '+String(j.sig||'').slice(0,16)+'…'):(j.note||'未配置密钥'), !!j.enabled);
+}
+async function enhCopyBundle(){
+  const v=$('#enh-sync-bundle').value; if(!v){ enhHint('#enh-sync-hint','先导出策略包',false); return; }
+  try{ await navigator.clipboard.writeText(v); enhHint('#enh-sync-hint','已复制到剪贴板',true); }
+  catch(e){ $('#enh-sync-bundle').select(); enhHint('#enh-sync-hint','浏览器不允许自动复制，已选中文本，请 Ctrl+C',false); }
+}
+async function enhImport(){
+  let b; try{ b=JSON.parse($('#enh-sync-bundle').value); }catch(e){ enhHint('#enh-sync-hint','粘贴的内容不是合法 JSON 策略包',false); return; }
+  if(!b.yaml||!b.sig){ enhHint('#enh-sync-hint','策略包缺少 yaml / sig 字段',false); return; }
+  if(!confirm('导入会覆盖本机规则集并立即热应用（'+(b.rules||'?')+' 条）。确认？')) return;
+  const r=await enhPost('/api/sync',{action:'apply',yaml:b.yaml,sig:b.sig}); const j=await r.json().catch(()=>({}));
+  enhHint('#enh-sync-hint', r.ok?('导入成功并已热应用：'+j.rules+' 条规则'):('导入被拒绝：'+(j.error||'')), r.ok);
+}
+
 /* ---- 导航 ---- */
-const titles={overview:'概览',rules:'规则管理',ipgroups:'地址簿',live:'实时拦截',conns:'连接跟踪',system:'能力中心',geofence:'地理围栏',config:'配置源'};
+const titles={overview:'概览',rules:'规则管理',ipgroups:'地址簿',live:'实时拦截',conns:'连接跟踪',system:'能力中心',geofence:'地理围栏',config:'配置源',enhance:'系统增强'};
 document.querySelectorAll('.nav-btn').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
@@ -854,6 +1037,7 @@ document.querySelectorAll('.nav-btn').forEach(b=>b.onclick=()=>{
   if(s==='config')loadConfig();
   if(s==='system')sysTick();
   if(s==='geofence')geoTick();
+  if(s==='enhance')enhTick();
 });
 checkAuth();
 </script>

@@ -11,7 +11,7 @@
 </p>
 
 > **一个二进制 = 引擎 + 规则 + Web 管理界面 + 图标**。纯 Go 实现，`CGO_ENABLED=0`，运行时零 Python、零外部依赖（仅 `gopkg.in/yaml.v3`）。
-> 支持两种执行后端：**用户态监控（monitor）** 与 **内核 nftables 真实丢包**，由启动参数 `--monitor` 决定。
+> 支持两种执行后端：**用户态监控（monitor）** 与 **内核 nftables 真实丢包**。启动时由 `--monitor` 决定，运行中可在「系统增强」页一键切换（带护栏自检 + 30 秒自动回滚），无需改 systemd 或重启。
 
 > 📌 **当前线上快照（2026-11-06 实测，对应提交 `a6c13be`）**
 > `http://192.168.58.128:18081/` · systemd 托管开机自启 · **monitor 模式** · 规则 27 条 · 地理围栏未启用
@@ -49,7 +49,7 @@
 | :--- | :--- |
 | 🟢 **L3 生产可用** | 已在 128 上稳定运行，页面 / API / 日志可验证 |
 | 🟡 **L2 监控试跑** | 逻辑全跑（决策、统计、规则生成），但当前 `--monitor` 下不真实丢包 |
-| 🔵 **L1 代码就绪 · 未启用** | 代码 + 测试 + 语法校验完成，线上没有切换，需人工确认后启用 |
+| 🔵 **L1 运行时可切换** | 代码 + 测试 + 语法校验完成，页面一键启用，默认未长期开启、需二次确认 |
 | ⚪ **L0 未实现** | 明确没做，不臆造 |
 
 | 能力 | 挡位 | 实现位置 / 验证方式 | 线上状态 |
@@ -68,19 +68,25 @@
 | 阈值自动封禁、手动封禁 / 解封、安全网段豁免 | 🟡 L2 | `geoctl/`、`/api/bans` | 判定生效；管理机 / 回环 / LAN 三层豁免已实测 |
 | 一键地理围栏（黑名单 / 白名单 / 端口 / 清空） | 🟡 L2 | `webui/geofence.go`，护栏强制前置 | 规则可生成、顺序可核对、可一键清空；**未真实断网** |
 | 中文国家选择 + 基于真实流量的策略预演 | 🟢 L3 | `webui/index.html`（`Intl.DisplayNames` + 来源国统计） | 页面可用，Ctrl+F5 后可见 |
-| **nftables 内核真实丢包**（`table inet gofw`） | 🔵 L1 | `enforce/`，`nft -c -f` 语法校验通过、规则顺序测试通过 | **未启用**，线上仍是 `--monitor` |
-| GeoIP v4/v6 命名集合 + 动态封禁集下发内核 | 🔵 L1 | `enforce/enforce.go`（`ip6 saddr`、`gofw_ban_v6`） | 代码就绪，未随 monitor 下发 |
-| 地理围栏真实封锁（国家级断网） | 🔵 L1 | 需去掉 `--monitor` 后重启 | 未启用 |
-| eBPF / XDP 数据面、分布式集群同步、多机策略下发 | ⚪ L0 | — | 未做 |
+| **运行时后端切换**（monitor ↔ nftables kernel） | 🟢 L3 | `enforce/switchable.go`；页面「系统增强」→ 装护栏 → 预检 → 切换 | 一键可用；切 kernel 需二次确认，切换后 30 秒未确认自动回滚 |
+| **nftables 内核真实丢包**（`table inet gofw`） | 🔵 L1 | `enforce/`；`nft -c -f` 语法校验、护栏顺序测试通过 | 能力已可启用，线上默认仍 monitor，需人工确认后切 |
+| GeoIP v4/v6 命名集合 + 动态封禁集下发内核 | 🔵 L1 | `enforce/enforce.go`（`ip6 saddr`、`gofw_ban_v6`） | 随 kernel 切换自动下发 |
+| 地理围栏真实封锁（国家级断网） | 🔵 L1 | 切换到 kernel 后围栏规则真实 DROP | 可启用，未长期开启 |
+| 仅安装护栏预设（不生成 DROP） | 🟢 L3 | `POST /api/geofence/apply` 的 `preset=guard` | 幂等，4 条 ACCEPT 置顶，单测覆盖 |
+| **审计日志留存**（JSONL 轮转 + 查询） | 🟢 L3 | `audit/`；8 MiB × 5 份，只记管理动作 | 启用，记录规则/围栏/封禁/登录/后端切换/策略导入 |
+| **Web 登录保护**（页面启用 / 修改 / 停用，密码落盘 0600） | 🟢 L3 | `webui/extensions.go`；启用时自动建立当前会话 | 可一键启用，默认关闭（不擅自锁死） |
+| **城市 / ASN 级策略**（`geo_city` / `geo_asn` 规则字段） | 🟢 L3 | `rules/`、`config/`、`engine/`；`LookupFull` | 字段可用；当前库为国家/地区级，无扩展列时不会误命中 |
+| **多机策略同步**（HMAC-SHA256 签名导出 / 导入） | 🟢 L3 | `webui/extensions.go`；`--sync-secret` | 签名不符一律拒绝，需两端同密钥 |
+| eBPF / XDP 线速数据面 | ⚪ L0 | — | **明确不做**，见下方「已知边界」说明 |
 
-> 一句话总结当前级别：**L3「看得清、配得动、数据真实」+ L2「决策与围栏全程试跑」+ L1「真丢包能力备好但没开」**。
-> 这是刻意保留的安全档：内网低配 VM 上，先把策略在监控里试跑、看清影响、确认护栏没锁住自己，再切内核。
+> 一句话总结当前级别：**L3「看得清、配得动、数据真实、可追溯、可集群同步」+ L2「决策与围栏全程试跑」+ L1「真丢包一键可切、带自动回滚」**。
+> 仍刻意保留 monitor 为默认挡：内网低配 VM 上先试跑、看清影响，再切内核；但切换本身已经不再需要改配置或重启。
 
 ---
 
 ## 🚦 两种运行挡位：monitor vs kernel
 
-| 对比项 | 🟡 monitor（**当前线上**） | 🟢 nftables kernel（去掉 `--monitor`） |
+| 对比项 | 🟡 monitor（**当前线上默认**） | 🟢 nftables kernel（页面一键切换） |
 | :--- | :--- | :--- |
 | 抓包 / 规则匹配 / 决策 | ✅ 全跑 | ✅ 全跑 |
 | 统计、日志、来源国排行、拦截流 | ✅ 真实 | ✅ 真实 |
@@ -88,9 +94,9 @@
 | 是否真的丢包 | ❌ **不丢包，流量照常通过** | ✅ 内核 `table inet gofw` 真实 DROP |
 | 自动封禁是否生效 | 记录判定、写入封禁表 | 额外下发 `@gofw_ban_v4/v6` 集合 |
 | Web 顶部横幅 | 黄色「旁路监控模式」 | 绿色「内核生效模式（nftables）」 |
-| 风险 | 无锁死风险 | 护栏缺失会锁死 SSH / Web |
+| 风险 | 无锁死风险 | 护栏缺失会锁死 SSH / Web；切换前强制预检，切换后 30 秒自动回滚兜底 |
 
-> 页面横幅由 `/api/geofence` 的 `mode` 字段驱动，**按真实 enforcer 类型显示**，不会把监控冒充成内核模式。
+> 页面横幅由 `/api/system` 的 `backend` 字段驱动，**取运行时真实后端**（`Switchable.Mode()`），不会把监控冒充成内核模式。切换入口在「系统增强」页：① 仅安装护栏 → ② 预检（nft 命令 / CAP_NET_ADMIN 权限 / `nft -c -f` 语法 / 护栏数量与顺序）→ ③ 二次确认切换 → ④ 验证 SSH 与面板可达后点「确认保留」。未确认则自动切回 monitor 并清空内核表。
 
 ---
 
@@ -106,6 +112,8 @@
 | `enforce/` | 双后端 | `MonitorEnforcer`（只记录）与 `NftablesEnforcer`（编译 limit / ct count / meter / TCP flags / GeoIP set / ban set） |
 | `webui/` | Web 管理 | 单页应用 + REST API，`//go:embed index.html` 与 `favicon.ico` 编入二进制 |
 | `config/` | 配置 | YAML 读写、注释锚点迁移（Save 不再抹掉手工分段注释）、并发安全 |
+| `audit/` | 审计日志 | 纯标准库 JSONL 轮转（8 MiB × 5），只记管理动作，不随包量增长 |
+| `enforce/switchable.go` | 运行时后端切换 | atomic 指针热路径无锁；预检 → 清旧表 → 下发 → 原子替换；失败保持原后端 |
 | `alert/` `ha/` | 告警 / 高可用 | Webhook（generic/slack/dingtalk）与 SMTP；VRRPv2 主备选举与 VIP 漂移，无权限回退 TCP 探测 |
 
 ---
@@ -119,7 +127,7 @@ flowchart TB
     E --> G[geoctl: 来源国统计 · 封禁判定]
     G --> B{执行后端 BuildEnforcer}
     B -->|--monitor 当前| M[MonitorEnforcer<br/>只记录 / 统计 / 决策<br/>不真实丢包]
-    B -->|去掉 --monitor| N[NftablesEnforcer<br/>table inet gofw<br/>真实 DROP]
+    B -->|运行时切换（护栏自检+自动回滚）| N[NftablesEnforcer<br/>table inet gofw<br/>真实 DROP]
     N --> K[(Linux 内核 nftables<br/>@geoip_XX · @gofw_ban_v4/v6)]
     D[(GeoIP CSV<br/>1,411,297 CIDR)] -->|流式加载 + 热更新| E
     D -->|国家集合| N
@@ -170,7 +178,7 @@ IPv6 段由起止区间拆分为最少 CIDR 并做同国相邻合并，抽样 24
 1. **选国家**：进「地理围栏」页，从中文下拉里选（中国 / 美国 / 俄罗斯…），或点常用国家按钮，不用记 `RU` / `US`。下拉里每个国家都标了网段数。
 2. **看预演**：页面用本次启动以来的**真实来源国流量**算出：选中这些国家有多少包、其它来源有多少包，并写明黑名单拦谁、白名单拦谁。
 3. **应用**：点「禁止这些国家访问」或「只允许这些国家访问」，规则列表里可逐条核对护栏是否排在最前；不满意点「清空，恢复原状」。
-4. **真正断网**：去掉启动参数 `--monitor` 并重启，切到 nftables 内核后端。横幅由黄变绿，此时规则才会真实丢包。
+4. **真正断网**：进「系统增强」页 → ① 仅安装护栏 → ② 预检 → ③ 切到内核真实拦截（二次确认）→ 验证 SSH / 面板可达后点「确认保留」。横幅由黄变绿，此时规则才会真实丢包；30 秒内没确认会自动回滚，不会把自己锁在外面。
 
 > 前三步在 monitor 下就能做、能看到结果；第 4 步是唯一会改变真实流量的动作，**必须先确认护栏放行了管理通道与内网**，否则可能把自己锁在服务器外面。
 
@@ -178,7 +186,7 @@ IPv6 段由起止区间拆分为最少 CIDR 并做同国相邻合并，抽样 24
 
 ## 🖥️ Web 管理界面与 API
 
-**页面**：概览、规则管理、地址簿、实时拦截、连接跟踪、能力中心、地理围栏、配置源。盾牌 favicon 与页面一起 `//go:embed` 编入二进制，无外部静态文件。
+**页面**：概览、规则管理、地址簿、实时拦截、连接跟踪、能力中心、地理围栏、配置源、**系统增强（后端切换 / 登录保护 / 审计 / 精度 / 策略同步）**。盾牌 favicon 与页面一起 `//go:embed` 编入二进制，无外部静态文件。
 
 全局挡位条常驻所有页面：monitor 黄色（只记录不丢包）、kernel 绿色（真实生效），避免把「拦截数」误读成实际丢包；概览卡片、图表与来源国排行统一使用「判定拦截」措辞。
 
@@ -195,6 +203,12 @@ IPv6 段由起止区间拆分为最少 CIDR 并做同国相邻合并，抽样 24
 | GET | `/api/geoip/countries` `/api/geoip/stats` | 国家列表 / 来源国排行与封禁配置 |
 | POST | `/api/geoip/reload` | 手动热加载 GeoIP 库 |
 | GET/POST/DELETE | `/api/bans`、`/api/bans/{ip}` | 封禁列表 / 手动封禁 / 解封 |
+| GET | `/api/backend` | 运行时后端、护栏数、自动回滚剩余秒数 |
+| POST | `/api/backend/preflight` `/switch` `/confirm` `/rollback` | 切换前预检 / 二次确认切换 / 确认保留 / 立即回滚 |
+| GET | `/api/audit?limit=&kind=` | 审计日志查询（倒序、类型过滤） |
+| GET/POST | `/api/auth` | 登录保护状态 / 启用、改密、停用 |
+| GET/POST | `/api/sync` | HMAC-SHA256 签名策略包导出 / 导入并热应用 |
+| GET | `/api/geoip/meta` `/api/geoip/lookup?ip=` | 库精度（国家 / 城市 / ASN）与单 IP 归属查询 |
 | GET | `/favicon.ico` | 内嵌盾牌图标 |
 
 > 未设置密码时 API 放行；设置密码后 `/api/*` 走会话 cookie 校验。能力中心上排全部取自 `/api/system` 运行实例真实字段（`backend`、`geofence`、`autoban`、GeoIP v4/v6/国家数、DPI 协议、连接跟踪、引擎统计），其中「执行后端」卡片直接标明是否真实丢包；下排为按当前规则集字段推导的防护能力，并标注「不等于内核已生效」。不用占位假数据。
@@ -248,6 +262,9 @@ sudo ./gofw.linux start -r rules.yaml -i ens32 --web :18081
 | `--ban-window` | `10` | 统计窗口（秒） |
 | `--ban-ttl` | `300` | 封禁时长（秒） |
 | `--ban-safe-cidr` | 空 | 永不封禁的额外网段（逗号分隔） |
+| `--audit-file` | `rules.yaml.audit.jsonl` | 审计日志文件（8 MiB × 5 轮转） |
+| `--web-auth-file` | `rules.yaml.webauth` | Web 登录密码持久化文件（0600） |
+| `--sync-secret` | 空（`GOFW_SYNC_SECRET`） | 多机策略同步 HMAC 密钥，空则导入禁用 |
 
 子命令：`start`、`rules list|stats|add|del`、`conns list`、`reload`、`test`（详见 `main.go`）。
 
@@ -272,11 +289,12 @@ node -e "const fs=require('fs');const h=fs.readFileSync('webui/index.html','utf8
 
 ## ⚠️ 已知边界与未做事项
 
-- **当前线上是 monitor**：页面上的"丢弃 / 拦截"是引擎决策计数，**不等于内核真丢包**；真实断网必须去掉 `--monitor` 并确认护栏。
-- **内核后端未做线上实切**：语法校验、规则顺序测试通过，但真实下发到生产流量尚未验证，属于 L1。
-- **GeoIP 精度**：国家/地区级，存在 `??`（无归属，含内网）与边界误差；IPv6 由区间拆分合并而来，非运营商原始宣告。
+- **当前线上默认仍是 monitor**：页面上的"丢弃 / 拦截"是引擎决策计数，**不等于内核真丢包**。切换能力已完全可用（页面一键、护栏预检、30 秒自动回滚），但真实下发到生产流量仍需人工确认后执行；未做「线上长期开启 kernel」的实证。
+- **GeoIP 精度**：线上库为国家/地区级，存在 `??`（无归属，含内网）与边界误差；IPv6 由区间拆分合并而来，非运营商原始宣告。`geo_city` / `geo_asn` 规则字段已可用，但只有导入 `CIDR,country,city,asn` 三/四列库才会命中，两列库下不误命中。
+- **城市 / ASN 规则与内核**：nftables 无法表达城市/ASN 匹配，带这两个条件的规则整条跳过内核下发，只在用户态决策层生效（避免退化成裸 drop 误伤全网）。
 - **DPI 在用户态**：用于识别与统计，不是内核线速过滤。
-- **未实现**：eBPF/XDP 数据面、集群策略同步、基于城市/ASN 的自动策略、Web 认证默认强制开启。
+- **Web 认证默认关闭**：可一键启用并持久化，但不会擅自强制开启——否则现有自动化脚本与未登录页面会被立刻挡住。
+- **eBPF / XDP 明确不做**：本项目硬约束是纯 Go、零 CGO、仅 `yaml.v3` 依赖、单二进制、`AF_PACKET` 用户态抓包。XDP 需要 `github.com/cilium/ebpf` 依赖、内核 BTF、clang 生成的 BPF 字节码或特权加载器，等于重写整个数据面，也会破坏低配 VM 上「一个二进制跑起来」的前提。这不是遗漏，是不在架构目标内；真要线速过滤的正确路径是直接用 nftables 内核后端（已具备）。
 
 ---
 
