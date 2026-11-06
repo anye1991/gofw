@@ -93,6 +93,10 @@ type NftablesEnforcer struct {
 	geoSetsV6 map[string][]string // IPv6 集合名 -> CIDR 元素
 	geoInfo   map[*rules.Rule]*geoRuleInfo
 
+	// per-src 动态集命名计数器与降级说明，同样仅在单次 buildScript 内有效。
+	meterSeq   int
+	limitNotes []string
+
 	// banProvider 返回当前临时封禁的 IP（按地址族分开），由 main.go 注入。
 	// 每次 Apply 时读取，使动态封禁随规则热替换一起下发内核。
 	banProvider func() (v4, v6 []string)
@@ -171,6 +175,8 @@ func (n *NftablesEnforcer) OnDecision(d engine.Decision) {
 }
 
 func (n *NftablesEnforcer) buildScript(rs *rules.RuleSet) string {
+	n.meterSeq = 0
+	n.limitNotes = nil
 	def := "drop"
 	if rs.DefaultAction == rules.ActionAccept {
 		def = "accept"
@@ -305,6 +311,7 @@ func (n *NftablesEnforcer) buildScript(rs *rules.RuleSet) string {
 // 语义与用户态 engine 的 GeoIPSpec.Matches 完全一致：
 //   - deny 模式（如 geoip: RU）：匹配"不属于列表国家" → 内核 matcher 用 "!=" 取反
 //   - allow 模式（如 geoip: allow:CN）：匹配"属于列表国家" → 内核 matcher 直接命中
+//
 // 若规则引用的国家在本机 GeoIP 库里没有任何网段，则整条规则跳过并告警，
 // 避免生成空集合导致 "ip saddr != @空集" 命中全部流量而误杀全网。
 func (n *NftablesEnforcer) compileGeoIP(rs *rules.RuleSet) (map[string][]string, map[string][]string, map[*rules.Rule]*geoRuleInfo) {
@@ -710,18 +717,60 @@ func (n *NftablesEnforcer) ruleLimitStmts(r *rules.Rule, chain string) []string 
 	return out
 }
 
+// DegradationNotes 返回本次脚本生成中因内核能力限制而降级的说明（已去重）。
+// 供运行时切换前的预检展示，避免把降级后的语义冒充成配置里的原始语义。
+func (n *NftablesEnforcer) DegradationNotes() []string {
+	out := make([]string, len(n.limitNotes))
+	copy(out, n.limitNotes)
+	return out
+}
+
+// noteDegradation 记录一条降级说明并去重（同一规则会在 input/output/forward 各生成一次）。
+func (n *NftablesEnforcer) noteDegradation(s string) {
+	for _, x := range n.limitNotes {
+		if x == s {
+			return
+		}
+	}
+	n.limitNotes = append(n.limitNotes, s)
+}
+
 // limitStmt 把匹配表达式(base)与超限动作(expr)组装成内核语句。
-// perSrc=true 时用按源 IP 的动态 meter（ip saddr 作键，带超时回收），
-// 实现“每个来源独立限流/限连接”，更接近真实防爆破/抗 DDoS 语义。
+//
+// nft v1.0.2 实测（nft -c -f）：
+//   - `meter size 65535 { ... drop }` 非法：meter 后必须跟集合名，且 verdict(drop)
+//     必须在花括号**外面**，否则报 "unexpected size/drop, expecting string/'}'"。
+//   - `meter <name> size 65535 { ip saddr timeout 1m limit rate over ... } drop` 合法，
+//     用于速率/带宽限制的“每源独立计数”。
+//   - `ct count over N` 无法与动态集组合（内核报 Operation not supported），
+//     因此 per-src 并发连接限制只能降级为全局 `ct state new ct count over N drop`；
+//     这是显式降级并通过 DegradationNotes 告知，绝不悄悄改语义。
 func (n *NftablesEnforcer) limitStmt(base []string, expr string, perSrc bool) string {
 	joined := strings.Join(base, " ")
-	if perSrc {
-		return fmt.Sprintf("%s meter size 65535 { ip saddr timeout 1m %s }", joined, expr)
+	if !perSrc {
+		if joined == "" {
+			return expr
+		}
+		return joined + " " + expr
 	}
+
+	// 并发连接限制：内核不支持 per-src ct count，降级为全局计数。
+	if strings.Contains(expr, "ct count over") {
+		n.noteDegradation("per-src 并发连接限制降级为全局 ct count over N（本机内核不支持动态集 + ct count，nft -c -f 报 Operation not supported）")
+		if joined == "" {
+			return expr
+		}
+		return joined + " " + expr
+	}
+
+	// 速率 / 带宽限制：meter 动态集，drop 移出花括号，集合名脚本内唯一。
+	n.meterSeq++
+	name := fmt.Sprintf("gofw_meter_%d", n.meterSeq)
+	inner := strings.TrimSuffix(strings.TrimSpace(expr), " drop")
 	if joined == "" {
-		return expr
+		return fmt.Sprintf("meter %s size 65535 { ip saddr timeout 1m %s } drop", name, inner)
 	}
-	return joined + " " + expr
+	return fmt.Sprintf("%s meter %s size 65535 { ip saddr timeout 1m %s } drop", joined, name, inner)
 }
 
 // hasCTState 判断匹配表达式中是否已含 ct state 子句。

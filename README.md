@@ -58,8 +58,8 @@
 | DPI 应用层协议识别（HTTP / TLS / SSH / DNS / MySQL / FTP / SMTP 等） | 🟢 L3 | `dpi/`；能力中心显示已加载 | 生效（用户态识别） |
 | 连接跟踪、TCP 状态机、IP 分片重组 | 🟢 L3 | `engine/`；连接跟踪页 | 生效 |
 | AF_PACKET 抓包、网关模式 | 🟢 L3 | `capture/`、`--gateway` | 可用，未开启网关模式 |
-| 限速 / 带宽 / 并发连接限制、NAT、VRRP 高可用 | 🟢 L3 | `enforce/`、`ha/`；有单元测试 | 编译与规则可用，线上未启用这些规则 |
-| Web 管理界面（8 个页面）+ 盾牌 favicon + 能力中心 | 🟢 L3 | `webui/`，`//go:embed` 编入二进制 | 200 可访问，能力中心有真实数据 |
+| 限速 / 带宽 / 并发连接限制、NAT、VRRP 高可用 | 🟢 L3 | `enforce/`、`ha/`；单元测试 + 目标机 `nft -c -f` 全量校验 | 规则在线上 27 条里已配置；monitor 下只在用户态决策，切 kernel 后由 nft meter / `ct count` 下发 |
+| Web 管理界面（9 个页面）+ 盾牌 favicon + 能力中心 | 🟢 L3 | `webui/`，`//go:embed` 编入二进制 | 200 可访问，能力中心有真实数据 |
 | 规则 / 地址簿增删改 + YAML 持久化 + 注释保留 | 🟢 L3 | `webui/webui.go`、`config/comments.go` | 生效，注释锚点迁移已测 |
 | 告警（Webhook / SMTP） | 🟢 L3 | `alert/`；`--alert /opt/gofw/alert.yaml` | 已配置 |
 | **全球 GeoIP 库**（141 万 CIDR、v4 + v6、250 国家/地区） | 🟢 L3 | `geoip/`；流式加载 + 最长前缀二分索引 | `/api/geofence` 返回 `loaded:true` |
@@ -69,7 +69,7 @@
 | 一键地理围栏（黑名单 / 白名单 / 端口 / 清空） | 🟡 L2 | `webui/geofence.go`，护栏强制前置 | 规则可生成、顺序可核对、可一键清空；**未真实断网** |
 | 中文国家选择 + 基于真实流量的策略预演 | 🟢 L3 | `webui/index.html`（`Intl.DisplayNames` + 来源国统计） | 页面可用，Ctrl+F5 后可见 |
 | **运行时后端切换**（monitor ↔ nftables kernel） | 🟢 L3 | `enforce/switchable.go`；页面「系统增强」→ 装护栏 → 预检 → 切换 | 一键可用；切 kernel 需二次确认，切换后 30 秒未确认自动回滚 |
-| **nftables 内核真实丢包**（`table inet gofw`） | 🔵 L1 | `enforce/`；`nft -c -f` 语法校验、护栏顺序测试通过 | 能力已可启用，线上默认仍 monitor，需人工确认后切 |
+| **nftables 内核真实丢包**（`table inet gofw`） | 🔵 L1 | `enforce/`；全量规则集 `nft -c -f` 语法校验通过（nft v1.0.2，31 条含护栏）、护栏顺序测试通过 | 能力已可启用，线上默认仍 monitor，需人工确认后切 |
 | GeoIP v4/v6 命名集合 + 动态封禁集下发内核 | 🔵 L1 | `enforce/enforce.go`（`ip6 saddr`、`gofw_ban_v6`） | 随 kernel 切换自动下发 |
 | 地理围栏真实封锁（国家级断网） | 🔵 L1 | 切换到 kernel 后围栏规则真实 DROP | 可启用，未长期开启 |
 | 仅安装护栏预设（不生成 DROP） | 🟢 L3 | `POST /api/geofence/apply` 的 `preset=guard` | 幂等，4 条 ACCEPT 置顶，单测覆盖 |
@@ -283,7 +283,7 @@ go test ./config ./enforce ./engine ./geoctl ./geoip ./webui
 node -e "const fs=require('fs');const h=fs.readFileSync('webui/index.html','utf8');const m=[...h.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];fs.writeFileSync('ui-check.js',m.map(x=>x[1]).join('\n'))" && node --check ui-check.js && rm ui-check.js
 ```
 
-新增 6 个回归测试：注释锚点迁移、GeoIP 最长前缀 / v4 / v6 / 热加载、自动封禁安全网段豁免、围栏规则顺序、nftables IPv6 集合。线上已验证：白名单 CN 生成 32 条规则且护栏置顶、Web/SSH 可达，`clear` 回 27 条无残留，手动热加载与公网 IP 封禁/解封正常，`nft -c -f` 语法校验通过。
+回归测试覆盖：注释锚点迁移、GeoIP 最长前缀 / v4 / v6 / 热加载、自动封禁安全网段豁免、围栏规则顺序、nftables IPv6 集合、城市/ASN 匹配、审计轮转、护栏预设、meter 语法（唯一集合名 + `drop` 在花括号外）。线上已验证：白名单 CN 生成 32 条规则且护栏置顶、Web/SSH 可达，`clear` 回 27 条无残留、4 段手工注释仍在，手动热加载与公网 IP 封禁/解封正常，装护栏后全量规则集 `nft -c -f` 预检通过（nft v1.0.2）。
 
 ---
 
@@ -292,6 +292,7 @@ node -e "const fs=require('fs');const h=fs.readFileSync('webui/index.html','utf8
 - **当前线上默认仍是 monitor**：页面上的"丢弃 / 拦截"是引擎决策计数，**不等于内核真丢包**。切换能力已完全可用（页面一键、护栏预检、30 秒自动回滚），但真实下发到生产流量仍需人工确认后执行；未做「线上长期开启 kernel」的实证。
 - **GeoIP 精度**：线上库为国家/地区级，存在 `??`（无归属，含内网）与边界误差；IPv6 由区间拆分合并而来，非运营商原始宣告。`geo_city` / `geo_asn` 规则字段已可用，但只有导入 `CIDR,country,city,asn` 三/四列库才会命中，两列库下不误命中。
 - **城市 / ASN 规则与内核**：nftables 无法表达城市/ASN 匹配，带这两个条件的规则整条跳过内核下发，只在用户态决策层生效（避免退化成裸 drop 误伤全网）。
+- **per-src 并发连接限制在内核侧降级**：目标机 nftables v1.0.2 内核不支持动态集 / meter 与 `ct count over N` 组合（`nft -c -f` 报 `Operation not supported`）。因此 `per_src: true` 的并发连接限制下发内核时降级为**全局** `ct state new ct count over N drop`，预检结果会以 `!` 明确列出，不会把「每源 N」悄悄冒充成原语义。速率 / 带宽限制的 per-src 仍由 nft meter 动态集实现真实的每源独立计数；meter 语法（必须带集合名、`drop` 必须在花括号外）已在目标机实测并全量校验通过。
 - **DPI 在用户态**：用于识别与统计，不是内核线速过滤。
 - **Web 认证默认关闭**：可一键启用并持久化，但不会擅自强制开启——否则现有自动化脚本与未登录页面会被立刻挡住。
 - **eBPF / XDP 明确不做**：本项目硬约束是纯 Go、零 CGO、仅 `yaml.v3` 依赖、单二进制、`AF_PACKET` 用户态抓包。XDP 需要 `github.com/cilium/ebpf` 依赖、内核 BTF、clang 生成的 BPF 字节码或特权加载器，等于重写整个数据面，也会破坏低配 VM 上「一个二进制跑起来」的前提。这不是遗漏，是不在架构目标内；真要线速过滤的正确路径是直接用 nftables 内核后端（已具备）。
