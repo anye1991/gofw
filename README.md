@@ -20,7 +20,7 @@
 
 ---
 
-> 📌 **生产运行快照（2026-11-24 实测，对应提交 `ab648b7`）**
+> 📌 **生产运行快照（2026-11-24 实测，实测于 2026-11-24，版本以仓库 HEAD 为准）**
 > 阿里云 ECS（PROD-HOST-IP）· systemd 托管开机自启 · **nftables 内核模式（真实丢包）** · 规则 27 条
 > 自动封禁已启用（50 次/10s → 封禁 600s）· GeoIP 库 1,411,297 条（IPv4 597,286 / IPv6 814,011，250 国家/地区，DBIP）
 > 累计真实丢弃 12.7 万+ 包（DNS 放大反射 / 扫描特征 / GeoIP-RU）；Web UI 绑定 `127.0.0.1:18082` 仅本机可达
@@ -261,7 +261,7 @@ exec /opt/gofw/gofw start -r /opt/gofw/rules.yaml -i eth0 \
   --ban-safe-cidr 127.0.0.1/32,ADMIN-CIDR
 ```
 
-- **实机配置快照**已归档进仓库：[deploy/prod-PROD-HOST-IP-20261124/](deploy/prod-PROD-HOST-IP-20261124/README.md)（rules.yaml / start-gofw.sh / systemd 单元 / autoban 恢复脚本，与实机逐字节一致、密码已脱敏）。
+- **实机配置快照**已归档进仓库：[deploy/prod-snapshot-20261124/](deploy/prod-snapshot-20261124/README.md)（rules.yaml / start-gofw.sh / systemd 单元 / autoban 恢复脚本，与实机逐字节一致、密码已脱敏）。
 - **升级发布**：本地 `GOOS=linux` 构建带 `-trimpath -ldflags "-s -w"`（单文件约 8.1 MB）→ scp 覆盖 `/opt/gofw/gofw` → `systemctl restart gofw`（重启 1-2 秒，规则自动重建，autoban 由启动脚本恢复）。仅改规则时无需重启：`gofw reload` 热重载。
 - **备份链**：`gofw.bak_YYYYMMDD`、`rules.yaml.bak-*`、仓库快照目录；规则文件当前 27 条。
 - **回滚**：用 `gofw.bak_*` 备份二进制替换后 `systemctl restart gofw`，或规则回滚用 `gofw reload` 指向备份 rules.yaml。
@@ -370,7 +370,7 @@ node -e "const fs=require('fs');const h=fs.readFileSync('webui/index.html','utf8
 
 - [功能说明（docs/FEATURES.md）](docs/FEATURES.md) — GeoIP 库、Web API、地理围栏、自动封禁、VRRP 细节
 - [部署与运维（deploy/README.md）](deploy/README.md) — systemd、严格模式、真下发流程
-- [生产实机快照（deploy/prod-PROD-HOST-IP-20261124/）](deploy/prod-PROD-HOST-IP-20261124/README.md) — 实机配置原样归档与模板差异说明
+- [生产实机快照（deploy/prod-snapshot-20261124/）](deploy/prod-snapshot-20261124/README.md) — 实机配置原样归档与模板差异说明
 
 ---
 
