@@ -33,6 +33,995 @@ rules:
       src_ip: 127.0.0.0/8
       dst_ip: 127.0.0.0/8
       comment: loopback
+  # ---- EdgeOne 回源节点放行（2026-11-24） ----
+  # 网段来源: 雷池 WAF EdgeOne IP 库(2025-09 快照) + 本站 30 天日志观测扩容段。
+  # 注意: 官方 api.edgeone.ai/ips 已于 2026-07-31 下线、免费版无源站防护，
+  # 无权威网段可取；每网段单条规则显式 src_ip（多网段 src_ip / ip_group 内核不支持）。
+  # EdgeOne 节点命中即终止遍历，绕过后续 Web 连接限制；变更通知期内需人工更新。
+    - action: accept
+      src_ip: 1.71.146.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 14.116.245.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 23.236.104.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 27.44.206.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 36.150.103.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 36.158.202.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 36.158.253.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 36.159.70.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 36.248.57.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 36.250.5.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 36.250.8.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 36.250.235.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 36.250.238.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 38.60.181.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 42.81.252.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.132.64.0/19
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.137.88.0/22
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.139.238.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.141.9.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.141.10.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.141.11.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.141.50.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.141.109.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.141.110.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.141.132.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.144.106.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.145.16.0/22
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.145.44.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.146.63.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.146.65.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.146.66.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.146.67.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.152.0.0/18
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.152.128.0/18
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.159.4.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.159.64.0/18
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.168.146.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.168.149.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.168.150.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.168.151.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.174.0.0/16
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 43.175.0.0/16
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 49.51.64.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 58.144.195.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 58.212.47.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 58.217.176.0/22
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 58.250.127.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 58.251.87.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 58.251.127.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 59.55.136.0/21
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 61.240.216.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 81.71.192.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 101.33.0.0/19
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 101.33.195.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 101.33.222.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 101.71.100.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 101.71.105.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 111.6.217.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 111.6.218.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 111.20.28.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 111.20.30.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 111.31.238.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 111.32.204.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 111.33.186.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 112.13.210.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 112.49.30.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 112.49.69.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 112.84.131.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 112.90.154.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 113.99.138.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 113.194.51.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 113.200.123.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 113.201.154.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 113.219.202.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 113.219.228.0/22
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 113.240.66.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 113.240.91.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 113.240.96.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 114.66.246.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 114.66.250.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 115.150.39.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 116.153.74.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 116.153.80.0/21
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 116.162.122.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 116.162.123.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 116.162.152.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 116.163.46.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 116.169.184.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 117.21.29.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 117.40.80.0/21
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 117.44.72.0/21
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 117.85.64.0/22
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 117.147.229.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 117.147.230.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 117.147.231.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 117.162.48.0/21
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 117.162.56.0/21
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 117.163.50.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 117.163.59.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 119.91.175.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 120.226.27.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 120.226.144.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 120.226.145.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 120.226.146.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 120.232.97.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 120.232.126.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 120.232.149.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 120.232.158.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 120.233.43.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 120.233.97.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 120.240.94.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 120.240.100.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 122.192.132.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 122.246.0.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 122.246.30.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 123.125.3.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 123.138.25.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 123.150.77.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 123.182.162.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 124.72.128.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 125.39.1.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 125.39.190.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 125.94.246.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 125.94.248.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 129.227.213.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 150.109.88.0/22
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 150.109.190.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 150.109.191.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 150.109.192.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 150.109.222.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 150.109.223.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 156.227.203.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 156.229.29.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 157.148.124.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 157.148.125.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 163.177.43.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 180.213.52.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 183.56.148.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 183.61.174.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 183.131.59.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 183.201.109.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 183.201.110.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 183.214.154.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 203.205.136.0/22
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 203.205.191.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 203.205.220.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 203.205.221.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 211.97.84.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 211.152.132.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 211.152.148.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 211.152.154.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 218.87.12.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 219.144.88.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 219.144.90.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 221.5.96.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 221.178.3.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 221.204.26.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 222.79.116.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 222.79.126.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 222.94.224.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 222.189.172.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 223.109.0.0/23
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 223.109.2.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
+    - action: accept
+      src_ip: 223.109.210.0/24
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: EdgeOne edge node allow
     - action: accept
       protocol: icmp
       direction: in
@@ -50,23 +1039,22 @@ rules:
       per_src: true
       comment: inbound SSH (5/s per source, kernel-enforced)
   # ---- 入站 Web（nginx 对外 80/443） ----
+  # EdgeOne 节点已被上方白名单放行（终止遍历），此处只约束“非 EdgeOne”来源：
+  # 直连源站的滥用/扫描连接受每源并发限制，EdgeOne 正常回源不受影响。
     - action: accept
       protocol: tcp
       dst_port: 80,443
       direction: in
-      comment: inbound http/https
+      conn_limit: 200
+      per_src: true
+      comment: inbound http/https (non-EdgeOne per-src conn limit, kernel-enforced)
   # ---- 宝塔面板端口 ----
     - action: accept
       protocol: tcp
       dst_port: 888,18706
       direction: in
       comment: baota panel ports
-    - action: accept
-      protocol: tcp
-      dst_port: 80,443
-      conn_limit: 200
-      per_src: true
-      comment: per-source 连接限速/限流 (防 SYN Flood 与连接耗尽, conn_limit 200, kernel-enforced)
+# （原 per-source conn_limit 200 规则为死代码：位于普通 accept 之后永不命中，已并入上方非 EdgeOne Web 规则，2026-11-24）
     - action: accept
       protocol: tcp
       dst_port: 22,80,443
