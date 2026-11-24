@@ -1,31 +1,50 @@
+<div align="center">
+
 # 🛡️ gofw · 纯 Go 网络层防火墙
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white" alt="Go">
-  <img src="https://img.shields.io/badge/CGO-0-success" alt="CGO disabled">
-  <img src="https://img.shields.io/badge/打包-单二进制-blueviolet" alt="single binary">
-  <img src="https://img.shields.io/badge/Python-0-orange" alt="no python">
-  <img src="https://img.shields.io/badge/GeoIP-1411297%20CIDR-informational" alt="GeoIP">
-  <img src="https://img.shields.io/badge/Platform-Linux-2ea44f?logo=linux&logoColor=white" alt="Platform">
-  <img src="https://img.shields.io/badge/License-MIT-blue" alt="License">
-</p>
+**一个二进制 = 引擎 + 规则 + Web 管理界面 + 图标**
 
-> **一个二进制 = 引擎 + 规则 + Web 管理界面 + 图标**。纯 Go 实现，`CGO_ENABLED=0`，运行时零 Python、零外部依赖（仅 `gopkg.in/yaml.v3`）。
-> 支持两种执行后端：**用户态监控（monitor）** 与 **内核 nftables 真实丢包**。启动时由 `--monitor` 决定，运行中可在「系统增强」页一键切换（带护栏自检 + 30 秒自动回滚），无需改 systemd 或重启。
+`CGO_ENABLED=0` 纯 Go 实现 · 零 Python · 零外部依赖（仅 `yaml.v3`）· nftables 内核真拦截
 
-> 📌 **当前线上快照（2026-11-06 实测，对应提交 `a6c13be`）**
-> `http://你的域名:18081/` · systemd 托管开机自启 · **monitor 模式** · 规则 27 条 · 地理围栏未启用
-> GeoIP 库 **1,411,297** 条（IPv4 597,286 / IPv6 814,011，250 个国家/地区，外部 DBIP CSV）
-> 本地与线上二进制哈希一致，页面 / favicon 200，常驻内存约 330–410 MB，负载正常。
-> ⚠️ **这一版跑的是监控挡位：只记录、统计、决策，不真实丢包。** 真实内核拦截的代码已就绪但未启用，见 [能力挡位](#-能力挡位速览)。
+[![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![CGO](https://img.shields.io/badge/CGO-0-success)]()
+[![二进制](https://img.shields.io/badge/打包-单二进制-blueviolet)]()
+[![GeoIP](https://img.shields.io/badge/GeoIP-1.41M%20CIDR-informational)]()
+[![内核拦截](https://img.shields.io/badge/nftables%20内核拦截-生产生效-brightgreen)]()
+[![自动封禁](https://img.shields.io/badge/autoban-50%2F10s%20%E2%86%92%20600s-orange)]()
+[![Platform](https://img.shields.io/badge/Platform-Linux-2ea44f?logo=linux&logoColor=white)]()
+[![License](https://img.shields.io/badge/License-木兰PSL--2.0-blue)](./LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/anye1991/gofw/master?logo=git&label=最近提交)](https://github.com/anye1991/gofw/commits/master)
+
+</div>
 
 ---
 
-![输入图片说明](docs/QQ20261108-024757.png)
+> 📌 **生产运行快照（2026-11-24 实测，对应提交 `ab648b7`）**
+> 阿里云 ECS（PROD-HOST-IP）· systemd 托管开机自启 · **nftables 内核模式（真实丢包）** · 规则 27 条
+> 自动封禁已启用（50 次/10s → 封禁 600s）· GeoIP 库 1,411,297 条（IPv4 597,286 / IPv6 814,011，250 国家/地区，DBIP）
+> 累计真实丢弃 12.7 万+ 包（DNS 放大反射 / 扫描特征 / GeoIP-RU）；Web UI 绑定 `127.0.0.1:18082` 仅本机可达
+> 源码、线上二进制、双端仓库三方同源；38 个源文件均带版权头。
+
+**链路分层**（gofw 与应用层 WAF 各管一段、互不冲突）：
+
+```
+互联网 ──▶ EdgeOne CDN ──▶ gofw（L3/L4：扫描特征 / 泛洪 / GeoIP / 自动封禁）
+                              │
+                              ▼
+                          YSL WAF（L7：语义 / CC / 防篡改 DNA）
+                              │
+                              ▼
+                          nginx ──▶ 业务
+```
+
+---
+
+![gofw 监控界面](docs/QQ20261108-024757.png)
 
 ## 📑 目录
 
-- [🎚️ 能力挡位速览](#-能力挡位速览)
+- [🎚️ 能力挡位速览](#️-能力挡位速览)
 - [🚦 两种运行挡位：monitor vs kernel](#-两种运行挡位monitor-vs-kernel)
 - [✨ 功能清单](#-功能清单)
 - [🏗️ 架构](#️-架构)
@@ -34,10 +53,12 @@
 - [🖥️ Web 管理界面与 API](#️-web-管理界面与-api)
 - [📦 当前部署与回滚](#-当前部署与回滚)
 - [🔧 构建、运行与参数](#-构建运行与参数)
+- [🩺 稳定性：低配机器为什么会「连不上」](#-稳定性低配机器为什么会连不上)
 - [✅ 验证与测试](#-验证与测试)
 - [⚠️ 已知边界与未做事项](#️-已知边界与未做事项)
 - [📚 文档索引](#-文档索引)
 - [📄 许可证与数据来源](#-许可证与数据来源)
+- [👤 作者](#-作者)
 
 ---
 
@@ -49,56 +70,55 @@
 
 | 挡位 | 含义 |
 | :--- | :--- |
-| 🟢 **L3 生产可用** | 已在 128 上稳定运行，页面 / API / 日志可验证 |
-| 🟡 **L2 监控试跑** | 逻辑全跑（决策、统计、规则生成），但当前 `--monitor` 下不真实丢包 |
-| 🔵 **L1 运行时可切换** | 代码 + 测试 + 语法校验完成，页面一键启用，默认未长期开启、需二次确认 |
+| 🟢 **L3 生产可用** | 已在生产稳定运行，页面 / API / 日志 / 内核计数可验证 |
+| 🟡 **L2 监控试跑** | 逻辑全跑（决策、统计、规则生成），需切 kernel 才真实丢包 |
+| 🔵 **L1 运行时可切换** | 代码 + 测试 + 语法校验完成，页面一键启用，需二次确认 |
 | ⚪ **L0 未实现** | 明确没做，不臆造 |
 
 | 能力 | 挡位 | 实现位置 / 验证方式 | 线上状态 |
 | :--- | :---: | :--- | :--- |
-| 多维规则匹配（IP/MAC/端口/协议/TCP flags/VLAN/时间段/方向/状态） | 🟢 L3 | `rules/`、`engine/`；Web 规则页 27 条 | 生效（用户态决策） |
+| 多维规则匹配（IP/MAC/端口/协议/TCP flags/VLAN/时间段/方向/状态） | 🟢 L3 | `rules/`、`engine/`；Web 规则页 27 条 | 生效（内核下发） |
 | DPI 应用层协议识别（HTTP / TLS / SSH / DNS / MySQL / FTP / SMTP 等） | 🟢 L3 | `dpi/`；能力中心显示已加载 | 生效（用户态识别） |
 | 连接跟踪、TCP 状态机、IP 分片重组 | 🟢 L3 | `engine/`；连接跟踪页 | 生效 |
 | AF_PACKET 抓包、网关模式 | 🟢 L3 | `capture/`、`--gateway` | 可用，未开启网关模式 |
-| 限速 / 带宽 / 并发连接限制、NAT、VRRP 高可用 | 🟢 L3 | `enforce/`、`ha/`；单元测试 + 目标机 `nft -c -f` 全量校验 | 规则在线上 27 条里已配置；monitor 下只在用户态决策，切 kernel 后由 nft meter / `ct count` 下发 |
-| Web 管理界面（9 个页面）+ 盾牌 favicon + 能力中心 | 🟢 L3 | `webui/`，`//go:embed` 编入二进制 | 200 可访问，能力中心有真实数据 |
+| 限速 / 带宽 / 并发连接限制、NAT、VRRP 高可用 | 🟢 L3 | `enforce/`、`ha/`；单元测试 + `nft -c -f` 全量校验 | **内核 meter / `ct count` 真实生效** |
+| Web 管理界面（9 个页面）+ 盾牌 favicon + 能力中心 + 版权页脚 | 🟢 L3 | `webui/`，`//go:embed` 编入二进制 | 200 可访问，能力中心有真实数据 |
 | 规则 / 地址簿增删改 + YAML 持久化 + 注释保留 | 🟢 L3 | `webui/webui.go`、`config/comments.go` | 生效，注释锚点迁移已测 |
 | 告警（Webhook / SMTP） | 🟢 L3 | `alert/`；`--alert /opt/gofw/alert.yaml` | 已配置 |
 | **全球 GeoIP 库**（141 万 CIDR、v4 + v6、250 国家/地区） | 🟢 L3 | `geoip/`；流式加载 + 最长前缀二分索引 | `/api/geofence` 返回 `loaded:true` |
 | GeoIP 定时热加载 + 手动重载 + 统计缓存 | 🟢 L3 | `--geoip-reload-interval 60`、`/api/geoip/reload` | 生效，内存无增长 |
-| 来源国实时排行、决策统计、拦截流 | 🟡 L2 | `geoctl/tracker.go`、`/api/geoip/stats` | 数据真实，但"丢弃"=引擎判定，非内核真丢 |
-| 阈值自动封禁、手动封禁 / 解封、安全网段豁免 | 🟡 L2 | `geoctl/`、`/api/bans` | 判定生效；管理机 / 回环 / LAN 三层豁免已实测 |
-| 一键地理围栏（黑名单 / 白名单 / 端口 / 清空） | 🟡 L2 | `webui/geofence.go`，护栏强制前置 | 规则可生成、顺序可核对、可一键清空；**未真实断网** |
-| 中文国家选择 + 基于真实流量的策略预演 | 🟢 L3 | `webui/index.html`（`Intl.DisplayNames` + 来源国统计） | 页面可用，Ctrl+F5 后可见 |
-| **运行时后端切换**（monitor ↔ nftables kernel） | 🟢 L3 | `enforce/switchable.go`；页面「系统增强」→ 装护栏 → 预检 → 切换 | 一键可用；切 kernel 需二次确认，切换后 30 秒未确认自动回滚 |
-| **nftables 内核真实丢包**（`table inet gofw`） | 🔵 L1 | `enforce/`；全量规则集 `nft -c -f` 语法校验通过（nft v1.0.2，31 条含护栏）、护栏顺序测试通过 | 能力已可启用，线上默认仍 monitor，需人工确认后切 |
-| GeoIP v4/v6 命名集合 + 动态封禁集下发内核 | 🔵 L1 | `enforce/enforce.go`（`ip6 saddr`、`gofw_ban_v6`） | 随 kernel 切换自动下发 |
-| 地理围栏真实封锁（国家级断网） | 🔵 L1 | 切换到 kernel 后围栏规则真实 DROP | 可启用，未长期开启 |
+| 来源国实时排行、决策统计、拦截流 | 🟢 L3 | `geoctl/tracker.go`、`/api/geoip/stats` | 数据真实，kernel 下即真实丢包统计 |
+| **阈值自动封禁（autoban）** | 🟢 L3 | `geoctl/`、`--auto-ban`；50 次/10s → 封禁 600s | **生产启用**，封禁集下发内核 `@gofw_ban_v4/v6` |
+| 手动封禁 / 解封、安全网段豁免 | 🟢 L3 | `/api/bans`；管理机 / 回环 / LAN 三层豁免 | 已实测 |
+| 一键地理围栏（黑名单 / 白名单 / 端口 / 清空） | 🟢 L3 | `webui/geofence.go`，护栏强制前置 | 规则可生成、顺序可核对、可一键清空 |
+| 中文国家选择 + 基于真实流量的策略预演 | 🟢 L3 | `webui/index.html`（`Intl.DisplayNames` + 来源国统计） | 页面可用 |
+| **nftables 内核真实丢包**（`table inet gofw`） | 🟢 L3 | `enforce/`；线上 11-13 起内核模式稳定运行，累计真实丢弃 12.7 万+ 包 | **生产默认** |
+| GeoIP v4/v6 命名集合 + 动态封禁集下发内核 | 🟢 L3 | `enforce/enforce.go`（`ip6 saddr`、`gofw_ban_v6`） | **生产生效**（GeoIP-RU 拦截计数持续增长） |
+| 地理围栏真实封锁（国家级断网） | 🟢 L3 | `geoip: allow:RU` 生产在拦 | **生产生效** |
 | 仅安装护栏预设（不生成 DROP） | 🟢 L3 | `POST /api/geofence/apply` 的 `preset=guard` | 幂等，4 条 ACCEPT 置顶，单测覆盖 |
 | **审计日志留存**（JSONL 轮转 + 查询） | 🟢 L3 | `audit/`；8 MiB × 5 份，只记管理动作 | 启用，记录规则/围栏/封禁/登录/后端切换/策略导入 |
-| **Web 登录保护**（页面启用 / 修改 / 停用，密码落盘 0600） | 🟢 L3 | `webui/extensions.go`；启用时自动建立当前会话 | 可一键启用，默认关闭（不擅自锁死） |
+| **Web 登录保护**（页面启用 / 修改 / 停用，密码落盘 0600） | 🟢 L3 | `webui/extensions.go`；启用时自动建立当前会话 | 可一键启用 |
 | **城市 / ASN 级策略**（`geo_city` / `geo_asn` 规则字段） | 🟢 L3 | `rules/`、`config/`、`engine/`；`LookupFull` | 字段可用；当前库为国家/地区级，无扩展列时不会误命中 |
 | **多机策略同步**（HMAC-SHA256 签名导出 / 导入） | 🟢 L3 | `webui/extensions.go`；`--sync-secret` | 签名不符一律拒绝，需两端同密钥 |
 | eBPF / XDP 线速数据面 | ⚪ L0 | — | **明确不做**，见下方「已知边界」说明 |
 
-> 一句话总结当前级别：**L3「看得清、配得动、数据真实、可追溯、可集群同步」+ L2「决策与围栏全程试跑」+ L1「真丢包一键可切、带自动回滚」**。
-> 仍刻意保留 monitor 为默认挡：内网低配 VM 上先试跑、看清影响，再切内核；但切换本身已经不再需要改配置或重启。
+> 一句话总结当前级别：**L3 全量「看得清、配得动、真实丢包、可追溯、可集群同步」**。运行时仍保留 monitor ↔ kernel 一键切换与自动回滚作为运维保险。
 
 ---
 
 ## 🚦 两种运行挡位：monitor vs kernel
 
-| 对比项 | 🟡 monitor（**当前线上默认**） | 🟢 nftables kernel（页面一键切换） |
+| 对比项 | 🟡 monitor | 🟢 nftables kernel（**当前生产默认**） |
 | :--- | :--- | :--- |
 | 抓包 / 规则匹配 / 决策 | ✅ 全跑 | ✅ 全跑 |
 | 统计、日志、来源国排行、拦截流 | ✅ 真实 | ✅ 真实 |
 | 地理围栏规则生成、护栏、清空 | ✅ 可用 | ✅ 可用 |
-| 是否真的丢包 | ❌ **不丢包，流量照常通过** | ✅ 内核 `table inet gofw` 真实 DROP |
+| 是否真的丢包 | ❌ 不丢包，流量照常通过 | ✅ 内核 `table inet gofw` 真实 DROP |
 | 自动封禁是否生效 | 记录判定、写入封禁表 | 额外下发 `@gofw_ban_v4/v6` 集合 |
 | Web 顶部横幅 | 黄色「旁路监控模式」 | 绿色「内核生效模式（nftables）」 |
 | 风险 | 无锁死风险 | 护栏缺失会锁死 SSH / Web；切换前强制预检，切换后 30 秒自动回滚兜底 |
 
-> 页面横幅由 `/api/system` 的 `backend` 字段驱动，**取运行时真实后端**（`Switchable.Mode()`），不会把监控冒充成内核模式。切换入口在「系统增强」页：① 仅安装护栏 → ② 预检（nft 命令 / CAP_NET_ADMIN 权限 / `nft -c -f` 语法 / 护栏数量与顺序）→ ③ 二次确认切换 → ④ 验证 SSH 与面板可达后点「确认保留」。未确认则自动切回 monitor 并清空内核表。
+> 页面横幅由 `/api/system` 的 `backend` 字段驱动，**取运行时真实后端**（`Switchable.Mode()`），不会把监控冒充成内核模式。生产从 2026-11-13 起长期运行 kernel 挡；monitor 挡保留为**运维保险**——出问题可一键切回只记录模式排障，再切回来。
 
 ---
 
@@ -112,7 +132,7 @@
 | `geoip/` | GeoIP | 流式 CSV 加载、原子替换、v4/v6 分族最长前缀索引、国家/统计预计算、城市与 ASN 扩展列可选、`LookupFull` |
 | `geoctl/` | 地理围栏控制 | 来源国计数、阈值封禁、手动封禁、版本变化触发重下发、三层安全网段豁免 |
 | `enforce/` | 双后端 | `MonitorEnforcer`（只记录）与 `NftablesEnforcer`（编译 limit / ct count / meter / TCP flags / GeoIP set / ban set） |
-| `webui/` | Web 管理 | 单页应用 + REST API，`//go:embed index.html` 与 `favicon.ico` 编入二进制 |
+| `webui/` | Web 管理 | 单页应用 + REST API + 版权页脚，`//go:embed index.html` 与 `favicon.ico` 编入二进制 |
 | `config/` | 配置 | YAML 读写、注释锚点迁移（Save 不再抹掉手工分段注释）、并发安全 |
 | `audit/` | 审计日志 | 纯标准库 JSONL 轮转（8 MiB × 5），只记管理动作，不随包量增长 |
 | `enforce/switchable.go` | 运行时后端切换 | atomic 指针热路径无锁；预检 → 清旧表 → 下发 → 原子替换；失败保持原后端 |
@@ -122,24 +142,36 @@
 
 ## 🏗️ 架构
 
-```mermaid
-flowchart TB
-    P[入站 / 出站 / 转发流量] --> C[capture: AF_PACKET 抓包]
-    C --> E[engine: 规则匹配 · DPI · 连接跟踪]
-    E --> G[geoctl: 来源国统计 · 封禁判定]
-    G --> B{执行后端 BuildEnforcer}
-    B -->|--monitor 当前| M[MonitorEnforcer<br/>只记录 / 统计 / 决策<br/>不真实丢包]
-    B -->|运行时切换（护栏自检+自动回滚）| N[NftablesEnforcer<br/>table inet gofw<br/>真实 DROP]
-    N --> K[(Linux 内核 nftables<br/>@geoip_XX · @gofw_ban_v4/v6)]
-    D[(GeoIP CSV<br/>1,411,297 CIDR)] -->|流式加载 + 热更新| E
-    D -->|国家集合| N
-    W[Web UI :18081<br/>8 个页面 · 能力中心 · 地理围栏] -->|REST API| CF[(rules.yaml)]
-    CF -->|热应用| B
-    W -->|状态 / 统计 / 封禁| G
+```
+                ┌──────────────────────────────────────────────────┐
+ 入站/出站/转发流量 ─▶ capture（AF_PACKET 抓包，混杂模式）              │
+                └─────────────────────────┬────────────────────────┘
+                                          ▼
+                ┌──────────────────────────────────────────────────┐
+                │ engine（规则匹配 · DPI 协议识别 · 连接跟踪）       │◀── GeoIP CSV（141 万 CIDR）
+                └─────────────────────────┬────────────────────────┘    流式加载 + 热更新
+                                          ▼
+                ┌──────────────────────────────────────────────────┐
+                │ geoctl（来源国统计 · 阈值/手动封禁判定）           │
+                └─────────────────────────┬────────────────────────┘
+                                          ▼
+                                BuildEnforcer（执行后端）
+                     ┌────────────────────┴────────────────────┐
+                     ▼                                         ▼
+         ┌───────────────────────────┐          ┌────────────────────────────┐
+         │ MonitorEnforcer           │◀════════▶│ NftablesEnforcer           │
+         │ 只记录/统计/决策           │  运行时  │ table inet gofw 真实 DROP  │
+         │ （不丢包，排障保险挡）     │  一键切换│ @geoip_XX · @gofw_ban_v4/v6│
+         └───────────────────────────┘ 护栏+自动└────────────────────────────┘
+                                        回滚
+                ┌──────────────────────────────────────────────────┐
+ 运维面         │ Web UI（9 页面 · 能力中心 · 地理围栏 · 审计）      │──▶ REST API ──▶ rules.yaml
+                └──────────────────────────────────────────────────┘          │ 热应用（互斥锁串行化）
+                                          └───────────────────────────────────┘
 ```
 
 - **控制面**：Web 改规则 → `config` 持久化 → `apply` 互斥锁串行化 → 后端重编译；库文件 mtime 变化触发版本变化重下发。
-- **数据面**：monitor 下走用户态决策；kernel 下由 nftables 集合匹配真实丢包。
+- **数据面**：kernel 下由 nftables 集合匹配真实丢包（生产）；monitor 下走用户态决策（排障保险）。
 - **运维面**：全部逻辑在一个 Go 进程里，`systemd` 托管，**没有 Python 助手、没有代理脚本**。
 
 ---
@@ -148,7 +180,7 @@ flowchart TB
 
 ### 真实库，不再是"代表性网段"
 
-旧文档写的是内置 16 国 / 1589 条精简库，那已经过时。当前线上加载的是**外部 DBIP Country Lite 全量库**（`rules.yaml.geoip`）：
+当前线上加载的是**外部 DBIP Country Lite 全量库**（`rules.yaml.geoip`）：
 
 | 指标 | 数值 |
 | :--- | ---: |
@@ -166,7 +198,7 @@ IPv6 段由起止区间拆分为最少 CIDR 并做同国相邻合并，抽样 24
 
 | 预设 | 语义 | 典型用途 |
 | :--- | :--- | :--- |
-| `blacklist` | 只拦选中国家，其它照常 | 阻断某国访问 |
+| `blacklist` | 只拦选中国家，其它照常 | 阻断某国访问（生产：RU 全量拦截） |
 | `whitelist` | 只放选中国家，其余全断 | 国家级地理围栏 / 仅本国访问 |
 | `ports` | 只在指定端口上限制 | 只保护 SSH / RDP |
 | `clear` | 只删 `[gofw-*]` 托管规则 | 一键回到原规则集 |
@@ -180,17 +212,17 @@ IPv6 段由起止区间拆分为最少 CIDR 并做同国相邻合并，抽样 24
 1. **选国家**：进「地理围栏」页，从中文下拉里选（中国 / 美国 / 俄罗斯…），或点常用国家按钮，不用记 `RU` / `US`。下拉里每个国家都标了网段数。
 2. **看预演**：页面用本次启动以来的**真实来源国流量**算出：选中这些国家有多少包、其它来源有多少包，并写明黑名单拦谁、白名单拦谁。
 3. **应用**：点「禁止这些国家访问」或「只允许这些国家访问」，规则列表里可逐条核对护栏是否排在最前；不满意点「清空，恢复原状」。
-4. **真正断网**：进「系统增强」页 → ① 仅安装护栏 → ② 预检 → ③ 切到内核真实拦截（二次确认）→ 验证 SSH / 面板可达后点「确认保留」。横幅由黄变绿，此时规则才会真实丢包；30 秒内没确认会自动回滚，不会把自己锁在外面。
+4. **切挡位**：进「系统增强」页 → ① 仅安装护栏 → ② 预检 → ③ 切到 monitor 试跑（黄横幅）或切回 kernel 真实拦截（绿横幅，二次确认）→ 30 秒内未确认自动回滚。
 
-> 前三步在 monitor 下就能做、能看到结果；第 4 步是唯一会改变真实流量的动作，**必须先确认护栏放行了管理通道与内网**，否则可能把自己锁在服务器外面。
+> 生产已在 kernel 挡长期运行。1-3 步随时可用；第 4 步是唯一会改变真实流量的动作，**必须先确认护栏放行了管理通道与内网**，否则可能把自己锁在服务器外面。
 
 ---
 
 ## 🖥️ Web 管理界面与 API
 
-**页面**：概览、规则管理、地址簿、实时拦截、连接跟踪、能力中心、地理围栏、配置源、**系统增强（后端切换 / 登录保护 / 审计 / 精度 / 策略同步）**。盾牌 favicon 与页面一起 `//go:embed` 编入二进制，无外部静态文件。
+**页面**：概览、规则管理、地址簿、实时拦截、连接跟踪、能力中心、地理围栏、配置源、**系统增强（后端切换 / 登录保护 / 审计 / 精度 / 策略同步）**。盾牌 favicon、页面与版权页脚一起 `//go:embed` 编入二进制，无外部静态文件。
 
-全局挡位条常驻所有页面：monitor 黄色（只记录不丢包）、kernel 绿色（真实生效），避免把「拦截数」误读成实际丢包；概览卡片、图表与来源国排行统一使用「判定拦截」措辞。
+全局挡位条常驻所有页面：monitor 黄色（只记录不丢包）、kernel 绿色（真实生效），避免把「拦截数」误读成实际丢包。
 
 | Method | Path | 说明 |
 | :--- | :--- | :--- |
@@ -213,25 +245,26 @@ IPv6 段由起止区间拆分为最少 CIDR 并做同国相邻合并，抽样 24
 | GET | `/api/geoip/meta` `/api/geoip/lookup?ip=` | 库精度（国家 / 城市 / ASN）与单 IP 归属查询 |
 | GET | `/favicon.ico` | 内嵌盾牌图标 |
 
-> 未设置密码时 API 放行；设置密码后 `/api/*` 走会话 cookie 校验。能力中心上排全部取自 `/api/system` 运行实例真实字段（`backend`、`geofence`、`autoban`、GeoIP v4/v6/国家数、DPI 协议、连接跟踪、引擎统计），其中「执行后端」卡片直接标明是否真实丢包；下排为按当前规则集字段推导的防护能力，并标注「不等于内核已生效」。不用占位假数据。
+> 未设置密码时 API 放行；设置密码后 `/api/*` 走会话 cookie 校验。生产实例 Web 仅绑 `127.0.0.1:18082`（经 SSH 隧道访问），不暴露公网。
 
 ---
 
 ## 📦 当前部署与回滚
 
-```ini
-# /etc/systemd/system/gofw.service（线上 ExecStart，保持 monitor）
-ExecStart=/opt/gofw/gofw start -r /opt/gofw/rules.yaml -i ens32 --web :18081 --monitor \
-  --stats-interval 15 --log-file /opt/gofw/gofw.log --alert /opt/gofw/alert.yaml \
-  --geoip-reload-interval 60 --auto-ban --ban-threshold 30 --ban-window 10 --ban-ttl 300 \
-  --ban-safe-cidr 192.168.58.0/24,127.0.0.0/8,10.0.0.0/8
+生产实机（PROD-HOST-IP）经 `start-gofw.sh` 启动：
+
+```bash
+# /opt/gofw/start-gofw.sh（生产实机，内核模式 + 自动封禁）
+nohup /opt/gofw/enable-autoban.sh >/var/log/gofw-autoban.log 2>&1 &   # 启动即恢复 autoban（运行时状态不持久化）
+exec /opt/gofw/gofw start -r /opt/gofw/rules.yaml -i eth0 \
+  --web 127.0.0.1:18082 --stats-interval 30 \
+  --ban-safe-cidr 127.0.0.1/32,ADMIN-CIDR
 ```
 
-- 访问：`http://192.168.58.128:18081/`（**不是 80 / 8981 / 8080**）。
-- 产物：`GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o gofw.linux .`，单文件约 11 MB，scp 覆盖 `/opt/gofw/gofw` 后重启即可。
-- 备份：`gofw.bak.*`、`gofw.service.bak.*`、`rules.yaml.geoip.bak.*`；规则文件 `rules.yaml` 保持原始 27 条。
-- 稳定性配置：`--log-packet-rate 20`、`/etc/logrotate.d/gofw`（50 MiB / 7 份 / copytruncate）、`journald.conf` 的 `SystemMaxUse=300M`；详见下方「稳定性」章节。
-- 回滚：代码回退到 `dba12b2`（本次增强前），或用备份二进制替换后 `systemctl restart gofw`。
+- **实机配置快照**已归档进仓库：[deploy/prod-PROD-HOST-IP-20261124/](deploy/prod-PROD-HOST-IP-20261124/README.md)（rules.yaml / start-gofw.sh / systemd 单元 / autoban 恢复脚本，与实机逐字节一致、密码已脱敏）。
+- **升级发布**：本地 `GOOS=linux` 构建带 `-trimpath -ldflags "-s -w"`（单文件约 8.1 MB）→ scp 覆盖 `/opt/gofw/gofw` → `systemctl restart gofw`（重启 1-2 秒，规则自动重建，autoban 由启动脚本恢复）。仅改规则时无需重启：`gofw reload` 热重载。
+- **备份链**：`gofw.bak_YYYYMMDD`、`rules.yaml.bak-*`、仓库快照目录；规则文件当前 27 条。
+- **回滚**：用 `gofw.bak_*` 备份二进制替换后 `systemctl restart gofw`，或规则回滚用 `gofw reload` 指向备份 rules.yaml。
 
 ---
 
@@ -239,13 +272,13 @@ ExecStart=/opt/gofw/gofw start -r /opt/gofw/rules.yaml -i ens32 --web :18081 --m
 
 ```bash
 # Linux 目标（推荐，仓库内 capture/ha 含 Linux 专用 syscall）
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -o gofw.linux .
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o gofw.linux .
 
-# 启动：监控挡位（当前线上）
-sudo ./gofw.linux start -r rules.yaml -i ens32 --web :18081 --monitor
+# 启动：内核真实拦截（生产挡位，需先确认护栏）
+sudo ./gofw.linux start -r rules.yaml -i eth0 --web 127.0.0.1:18082
 
-# 启动：内核真实拦截（需先确认护栏）
-sudo ./gofw.linux start -r rules.yaml -i ens32 --web :18081
+# 启动：监控挡位（只记录不丢包，排障用）
+sudo ./gofw.linux start -r rules.yaml -i eth0 --web 127.0.0.1:18082 --monitor
 ```
 
 | 参数 | 默认 | 说明 |
@@ -253,17 +286,17 @@ sudo ./gofw.linux start -r rules.yaml -i ens32 --web :18081
 | `-r, --rules` | 必填 | 规则文件 |
 | `-i, --interface` | `eth0` | 监听网卡 |
 | `--monitor` | `false` | **只记录决策 / 统计 / 日志，不真实丢包** |
-| `--web` | — | Web 监听地址，如 `:18081` |
+| `--web` | — | Web 监听地址，生产绑 `127.0.0.1:18082` 不暴露公网 |
 | `--workers` | CPU 核数 | 工作线程数 |
 | `--stats-interval` | `0` | 统计输出间隔（秒） |
-| `--ctl-sock` | `/tmp/gofw.sock` | 控制套接字 |
+| `--ctl-sock` | `/tmp/gofw.sock` | 控制套接字（`gofw reload` 热重载通道） |
 | `--gateway` | `false` | 网关模式（IP 转发 + 多网卡抓包） |
 | `--ha` / `--alert` / `--log-file` | — | 高可用配置 / 告警配置 / 日志文件 |
 | `--geoip-reload-interval` | `0`（关闭） | GeoIP 库 mtime 热加载检查间隔（秒） |
 | `--auto-ban` | `false` | 启用阈值自动封禁 |
-| `--ban-threshold` | `20` | 窗口内 DROP 次数阈值 |
+| `--ban-threshold` | `20` | 窗口内 DROP 次数阈值（生产 50） |
 | `--ban-window` | `10` | 统计窗口（秒） |
-| `--ban-ttl` | `300` | 封禁时长（秒） |
+| `--ban-ttl` | `300` | 封禁时长（秒，生产 600） |
 | `--ban-safe-cidr` | 空 | 永不封禁的额外网段（逗号分隔） |
 | `--audit-file` | `rules.yaml.audit.jsonl` | 审计日志文件（8 MiB × 5 轮转） |
 | `--web-auth-file` | `rules.yaml.webauth` | Web 登录密码持久化文件（0600） |
@@ -275,6 +308,8 @@ sudo ./gofw.linux start -r rules.yaml -i ens32 --web :18081
 ---
 
 ## 🩺 稳定性：低配机器为什么会「连不上」
+
+> 本章节记录的是早期 monitor 挡在低配 VM 上的历史事故与根治方案；生产现已切 kernel 挡，但日志限速与轮转机制仍然保留——它们对 kernel 挡同样有价值。
 
 线上曾反复出现的症状：ping 通、22 / 18081 端口能连，但 SSH 拿不到 banner、网页一个字节不回；内核日志里**没有** OOM / hung task，journald 出现时间戳倒挂，systemd 反复报 `gofw.service: Failed with result 'timeout'`。这是**用户态被日志 IO 拖死**，不是进程崩溃，也不是内存爆掉（2 GB 内存当时还有富余）。
 
@@ -308,47 +343,53 @@ sudo ./gofw.linux start -r rules.yaml -i ens32 --web :18081
 # Linux 全量编译（Windows 本机请带 GOOS=linux，capture/ha 是 Linux 专用代码）
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build ./...
 
-# 本次增强相关包测试（跨平台可跑）
+# 核心包测试（跨平台可跑）
 go test ./config ./enforce ./engine ./geoctl ./geoip ./webui
 
 # 页面 JS 语法（抽取 <script> 内容后校验，临时文件随即删除）
 node -e "const fs=require('fs');const h=fs.readFileSync('webui/index.html','utf8');const m=[...h.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];fs.writeFileSync('ui-check.js',m.map(x=>x[1]).join('\n'))" && node --check ui-check.js && rm ui-check.js
 ```
 
-回归测试覆盖：注释锚点迁移、GeoIP 最长前缀 / v4 / v6 / 热加载、自动封禁安全网段豁免、围栏规则顺序、nftables IPv6 集合、城市/ASN 匹配、审计轮转、护栏预设、meter 语法（唯一集合名 + `drop` 在花括号外）。线上已验证：白名单 CN 生成 32 条规则且护栏置顶、Web/SSH 可达，`clear` 回 27 条无残留、4 段手工注释仍在，手动热加载与公网 IP 封禁/解封正常，装护栏后全量规则集 `nft -c -f` 预检通过（nft v1.0.2）。
+回归测试覆盖：注释锚点迁移、GeoIP 最长前缀 / v4 / v6 / 热加载、自动封禁安全网段豁免、围栏规则顺序、nftables IPv6 集合、城市/ASN 匹配、审计轮转、护栏预设、meter 语法（唯一集合名 + `drop` 在花括号外）。线上已验证：白名单 CN 生成 32 条规则且护栏置顶、Web/SSH 可达，`clear` 回原始规则集无残留、手工注释保留，手动热加载与公网 IP 封禁/解封正常，全量规则集 `nft -c -f` 预检通过。
 
 ---
 
 ## ⚠️ 已知边界与未做事项
 
-- **当前线上默认仍是 monitor**：页面上的"丢弃 / 拦截"是引擎决策计数，**不等于内核真丢包**。切换能力已完全可用（页面一键、护栏预检、30 秒自动回滚），但真实下发到生产流量仍需人工确认后执行；未做「线上长期开启 kernel」的实证。
 - **GeoIP 精度**：线上库为国家/地区级，存在 `??`（无归属，含内网）与边界误差；IPv6 由区间拆分合并而来，非运营商原始宣告。`geo_city` / `geo_asn` 规则字段已可用，但只有导入 `CIDR,country,city,asn` 三/四列库才会命中，两列库下不误命中。
 - **城市 / ASN 规则与内核**：nftables 无法表达城市/ASN 匹配，带这两个条件的规则整条跳过内核下发，只在用户态决策层生效（避免退化成裸 drop 误伤全网）。
 - **per-src 并发连接限制在内核侧降级**：目标机 nftables v1.0.2 内核不支持动态集 / meter 与 `ct count over N` 组合（`nft -c -f` 报 `Operation not supported`）。因此 `per_src: true` 的并发连接限制下发内核时降级为**全局** `ct state new ct count over N drop`，预检结果会以 `!` 明确列出，不会把「每源 N」悄悄冒充成原语义。速率 / 带宽限制的 per-src 仍由 nft meter 动态集实现真实的每源独立计数；meter 语法（必须带集合名、`drop` 必须在花括号外）已在目标机实测并全量校验通过。
 - **DPI 在用户态**：用于识别与统计，不是内核线速过滤。
 - **每包日志默认限速 20 行/秒**：为防止日志 IO 拖死低配机器（见「稳定性」章节），流水日志会按速率采样，被省略的行数在 `log_suppressed` 里汇总。精确计数看 `/api/stats`，不靠日志流水；需要全量时用 `--log-packet-rate -1`。
-- **Web 认证默认关闭**：可一键启用并持久化，但不会擅自强制开启——否则现有自动化脚本与未登录页面会被立刻挡住。
-- **eBPF / XDP 明确不做**：本项目硬约束是纯 Go、零 CGO、仅 `yaml.v3` 依赖、单二进制、`AF_PACKET` 用户态抓包。XDP 需要 `github.com/cilium/ebpf` 依赖、内核 BTF、clang 生成的 BPF 字节码或特权加载器，等于重写整个数据面，也会破坏低配 VM 上「一个二进制跑起来」的前提。这不是遗漏，是不在架构目标内；真要线速过滤的正确路径是直接用 nftables 内核后端（已具备）。
+- **Web 认证默认关闭**：可一键启用并持久化，但不会擅自强制开启——否则现有自动化脚本与未登录页面会被立刻挡住。生产实例 Web 仅绑回环地址，公网不可达。
+- **eBPF / XDP 明确不做**：本项目硬约束是纯 Go、零 CGO、仅 `yaml.v3` 依赖、单二进制、`AF_PACKET` 用户态抓包。XDP 需要 `github.com/cilium/ebpf` 依赖、内核 BTF、clang 生成的 BPF 字节码或特权加载器，等于重写整个数据面，也会破坏低配 VM 上「一个二进制跑起来」的前提。这不是遗漏，是不在架构目标内；真要线速过滤的正确路径是直接用 nftables 内核后端（生产已启用）。
 
 ---
 
 ## 📚 文档索引
 
 - [功能说明（docs/FEATURES.md）](docs/FEATURES.md) — GeoIP 库、Web API、地理围栏、自动封禁、VRRP 细节
-- [部署与运维（deploy/README.md）](deploy/README.md) — systemd、严格模式、真下发流程（注意线上目前是 monitor）
+- [部署与运维（deploy/README.md）](deploy/README.md) — systemd、严格模式、真下发流程
+- [生产实机快照（deploy/prod-PROD-HOST-IP-20261124/）](deploy/prod-PROD-HOST-IP-20261124/README.md) — 实机配置原样归档与模板差异说明
 
 ---
 
 ## 📄 许可证与数据来源
 
-- 代码：**MIT**，见 [LICENSE](LICENSE)。
+- 代码：**木兰宽松许可证，第2版（Mulan PSL v2）**，见 [LICENSE](LICENSE)；全部 38 个 Go 源文件均带版权头（`SPDX-License-Identifier: MulanPSL-2.0`）。
 - GeoIP 数据：DBIP Country Lite，**CC BY 4.0**，需保留署名；国家/地区级精度，详见库文件旁 `rules.yaml.geoip.LICENSE`。
 
 ---
 
+<div align="center">
+
 ## 👤 作者
 
-- **署名**：暗夜铭少 · **邮箱**：azgq@foxmail.com
-- 仓库：https://gitee.com/nights-shadow/gofw.git
+**暗夜铭少**（Nights-Shadow）
 
-欢迎提交 Issue 和 Pull Request。
+[![Gitee](https://img.shields.io/badge/Gitee-nights--shadow-C71D23?logo=gitee)](https://gitee.com/nights-shadow)
+[![GitHub](https://img.shields.io/badge/GitHub-anye1991-181717?logo=github)](https://github.com/anye1991)[![Email](https://img.shields.io/badge/Email-azgq%40foxmail.com-informational?logo=minutemailer)](mailto:azgq@foxmail.com)
+
+欢迎提交 Issue 和 Pull Request
+
+</div>
