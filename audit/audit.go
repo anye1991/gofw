@@ -1,3 +1,10 @@
+// Copyright (c) 2026 暗夜铭少 (Nights-Shadow)
+// 仓库: https://gitee.com/nights-shadow/gofw
+//
+// 本源代码文件依据《木兰宽松许可证，第2版》(Mulan PSL v2) 授权使用。
+// 你应当已随本项目获得许可证副本；若未获得，请访问 https://license.coscl.org.cn/MulanPSL2
+// SPDX-License-Identifier: MulanPSL-2.0
+
 // Package audit 提供纯标准库的 JSONL 审计日志：轮转写入 + 最近记录查询。
 // 记录规则变更、地理围栏、封禁、后端切换、登录等管理动作，不记录_packet_流水，
 // 避免在高包量下把磁盘打满；文件按大小轮转并限制保留份数。

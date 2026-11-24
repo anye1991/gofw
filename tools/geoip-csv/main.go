@@ -1,21 +1,33 @@
+// Copyright (c) 2026 暗夜铭少 (Nights-Shadow)
+// 仓库: https://gitee.com/nights-shadow/gofw
+//
+// 本源代码文件依据《木兰宽松许可证，第2版》(Mulan PSL v2) 授权使用。
+// 你应当已随本项目获得许可证副本；若未获得，请访问 https://license.coscl.org.cn/MulanPSL2
+// SPDX-License-Identifier: MulanPSL-2.0
+
 // Command geoip-csv 将免费全球 GeoIP 数据源转换为 gofw 的 rules.yaml.geoip 格式。
 //
 // 输出格式（每行）: CIDR,国家码
-//   例: 1.0.0.0/24,CN
+//
+//	例: 1.0.0.0/24,CN
+//
 // 与 geoip.DB.LoadFromCSV 直接兼容（国家码会被转大写，无需表头）。
 //
 // 支持的数据源（--format）:
-//   sapics    sapics/ip-location-db 的 country-ipv4.csv（start_ip,end_ip,country_code，无表头）
-//   ip2location  IP2Location LITE DB11 CSV（带表头，含引号：country_code,country_name,start_ip,end_ip,...）
-//   cidr       已为 CIDR,国家码 的中间产物（仅做国家码清洗/去重）
+//
+//	sapics    sapics/ip-location-db 的 country-ipv4.csv（start_ip,end_ip,country_code，无表头）
+//	ip2location  IP2Location LITE DB11 CSV（带表头，含引号：country_code,country_name,start_ip,end_ip,...）
+//	cidr       已为 CIDR,国家码 的中间产物（仅做国家码清洗/去重）
 //
 // 数据源获取（免费、无需鉴权）:
-//   sapics: https://raw.githubusercontent.com/sapics/ip-location-db/master/country-ipv4.csv
-//   IP2Location LITE DB11: https://lite.ip2location.com/database-ip-country
+//
+//	sapics: https://raw.githubusercontent.com/sapics/ip-location-db/master/country-ipv4.csv
+//	IP2Location LITE DB11: https://lite.ip2location.com/database-ip-country
 //
 // 用法:
-//   geoip-csv -in country-ipv4.csv -out rules.yaml.geoip -format sapics
-//   curl -s URL | geoip-csv -format sapics -out rules.yaml.geoip
+//
+//	geoip-csv -in country-ipv4.csv -out rules.yaml.geoip -format sapics
+//	curl -s URL | geoip-csv -format sapics -out rules.yaml.geoip
 package main
 
 import (

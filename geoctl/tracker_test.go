@@ -1,3 +1,10 @@
+// Copyright (c) 2026 暗夜铭少 (Nights-Shadow)
+// 仓库: https://gitee.com/nights-shadow/gofw
+//
+// 本源代码文件依据《木兰宽松许可证，第2版》(Mulan PSL v2) 授权使用。
+// 你应当已随本项目获得许可证副本；若未获得，请访问 https://license.coscl.org.cn/MulanPSL2
+// SPDX-License-Identifier: MulanPSL-2.0
+
 package geoctl
 
 import (
@@ -19,9 +26,9 @@ func TestBanManualRejectsSafeRanges(t *testing.T) {
 
 	safeIPs := []string{
 		"192.168.58.1", "192.168.58.128", // 管理网段
-		"127.0.0.1", "::1",               // 回环
-		"10.1.2.3", "172.16.5.9",         // RFC1918
-		"169.254.1.1", "fe80::1",         // 链路本地
+		"127.0.0.1", "::1", // 回环
+		"10.1.2.3", "172.16.5.9", // RFC1918
+		"169.254.1.1", "fe80::1", // 链路本地
 	}
 	for _, ip := range safeIPs {
 		if _, err := tr.BanManual(ip, "", 60); err == nil {
