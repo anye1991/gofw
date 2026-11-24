@@ -1,0 +1,169 @@
+# gofw 生产规则 · 阿里云 ECS 适配
+# 定位: 作为现有 UFW/iptables 之上的【增强阻断层】
+#   default: accept → 本表只做"精确阻断 + 显式放行"，不叠加 DROP 现有已放行的流量
+#           (避免和 UFW/iptables 叠加后把 SSH/宝塔/MySQL 等掐断)
+#
+# 内核强制说明:
+#   - 所有 DROP / 限速 / 并发限制 / GeoIP 均编译进 nftables 内核表 table inet gofw，
+#     由内核逐包强制执行（不是用户态旁路嗅探）。
+#   - rate_limit / conn_limit / bandwidth 此前仅在 monitor 模式生效，现已内核化:
+#     超限流量在内核直接丢弃（limit rate over / ct count over / meter 按源）。
+#   - GeoIP: 拦截规则引用的国家会编译成内核命名集合(set geoip_XX)真拦截;
+#     全国家数据由同目录 rules.yaml.geoip 提供(245国/59.7万CIDR)，
+#     无该文件时回退内置精简库(约16地区)。
+default: accept
+ip_groups:
+    admin_cidrs: 127.0.0.1/32,ADMIN-CIDR
+    web_servers: 127.0.0.1/32
+rules:
+  # ---- 管理网段数据面白名单(2026-11-12 根治自锁) ----
+  # ip_groups.admin_cidrs 只管管理 API，不下发 nft 数据面；此处显式 accept，
+  # 置于链首匹配后终止遍历，绕过后续 per-src meter / conn_limit / drop。
+    - action: accept
+      src_ip: ADMIN-CIDR
+      comment: owner admin CIDR data-plane whitelist (bypass all rate limits)
+# 地址簿（IP 组），可在规则中通过 ip_group 引用
+  # 你的管理员来源网段（按需替换）。留空则不限制 SSH 来源（由 UFW 的 ysl_admin4 兜底）
+  # ---- 已建立连接优先放行（防止误断活跃会话 / 正在使用的 SSH） ----
+    - action: accept
+      state: established
+      comment: allow established/related
+  # ---- 回环 ----
+    - action: accept
+      src_ip: 127.0.0.0/8
+      dst_ip: 127.0.0.0/8
+      comment: loopback
+    - action: accept
+      protocol: icmp
+      direction: in
+      rate_limit: 50
+      burst: 100
+      per_src: true
+      comment: inbound icmp (50/s per source, flood dropped, 防 ICMP 放大/amplification)
+  # ---- 入站 SSH（每源限速 5/s 防爆破，超限内核丢弃） ----
+    - action: accept
+      protocol: tcp
+      dst_port: "22"
+      direction: in
+      rate_limit: 20
+      burst: 40
+      per_src: true
+      comment: inbound SSH (5/s per source, kernel-enforced)
+  # ---- 入站 Web（nginx 对外 80/443） ----
+    - action: accept
+      protocol: tcp
+      dst_port: 80,443
+      direction: in
+      comment: inbound http/https
+  # ---- 宝塔面板端口 ----
+    - action: accept
+      protocol: tcp
+      dst_port: 888,18706
+      direction: in
+      comment: baota panel ports
+    - action: accept
+      protocol: tcp
+      dst_port: 80,443
+      conn_limit: 200
+      per_src: true
+      comment: per-source 连接限速/限流 (防 SYN Flood 与连接耗尽, conn_limit 200, kernel-enforced)
+    - action: accept
+      protocol: tcp
+      dst_port: 22,80,443
+      direction: in
+      rate_limit: 100
+      burst: 200
+      per_src: true
+      comment: 新建连接限流/限连 (per-source new-connection rate limit, 防 SYN Flood 与连接耗尽)
+  # ---- 出站 DNS 显式放行（2026-11-24 修监视器误判） ----
+  # 监视器匹配时不看 direction，把「block inbound DNS UDP/53」误套到出站查询上刷 DROP 日志；
+  # 此规则内核侧只进 output 链（direction: out），数据面行为不变，监视器命中 accept 后停止遍历。
+    - action: accept
+      protocol: udp
+      dst_port: "53"
+      direction: out
+      comment: outbound DNS allow (fix monitor direction-blind misjudge, 2026-11-24)
+
+  # ==================== 以下为真正生效的精确阻断 ====================
+  # 已知恶意网段（示例，可替换为真实威胁情报）
+    - action: drop
+      src_ip: 203.0.113.0/24
+      comment: block known-bad CIDR (TEST-NET-3)
+    - action: drop
+      protocol: udp
+      dst_port: "53"
+      direction: in
+      comment: block inbound DNS UDP/53 放大反射 (amplification)
+  # ---- 隐蔽扫描特征（内核丢弃） ----
+  # Xmas 扫描（FIN+PSH+URG 同时置位）
+    - action: drop
+      protocol: tcp
+      tcp_flags:
+        set: fin,psh,urg
+        mask: fin,psh,urg
+      comment: block xmas scan
+  # NULL 扫描（所有标志位全 0）
+    - action: drop
+      protocol: tcp
+      tcp_flags:
+        set: ""
+        mask: fin,syn,rst,psh,ack,urg
+      comment: block null scan (all flags zero)
+  # FIN 扫描（仅 FIN 置位、无 SYN/ACK —— 正常挥手是 FIN+ACK，不受影响）
+    - action: drop
+      protocol: tcp
+      tcp_flags:
+        set: fin
+        mask: fin,syn,rst,psh,ack,urg
+      comment: block FIN-only stealth scan
+  # SYN+FIN 非法组合
+    - action: drop
+      protocol: tcp
+      tcp_flags:
+        set: syn,fin
+        mask: syn,fin
+      comment: block syn+fin illegal combo
+  # SYN+RST 非法组合
+    - action: drop
+      protocol: tcp
+      tcp_flags:
+        set: syn,rst
+        mask: syn,rst
+      comment: block syn+rst illegal combo
+  # ---- 伪造/保留源地址（bogon）丢弃 ----
+  # 仅列明显非法段，避免误伤本机管理网段（管理流量经 NAT 网关，不阻断 RFC1918）
+    - action: drop
+      src_ip: 0.0.0.0/8
+      comment: drop bogon 0.0.0.0/8
+    - action: drop
+      src_ip: 127.0.0.0/8
+      comment: drop spoofed loopback source
+    - action: drop
+      src_ip: 169.254.0.0/16
+      comment: drop link-local source
+    - action: drop
+      src_ip: 224.0.0.0/4
+      comment: drop multicast source
+    - action: drop
+      src_ip: 240.0.0.0/4
+      comment: drop reserved source
+    - action: drop
+      src_ip: ::/128
+      comment: drop ipv6 unspecified source (ipv6)
+    - action: drop
+      src_ip: ::1/128
+      comment: drop ipv6 loopback source (ipv6)
+    - action: drop
+      src_ip: fe80::/10
+      comment: drop ipv6 link-local source (ipv6)
+    - action: drop
+      src_ip: fc00::/7
+      comment: drop ipv6 unique-local source (ipv6)
+  # ---- GeoIP 国家拦截（内核命名集合真拦截；全国家库见 rules.yaml.geoip） ----
+  # allow:RU = 拦截来自俄罗斯的流量; deny:XX = 只放行 XX（慎用，影响极大）
+    - action: drop
+      geoip: allow:RU
+      comment: block inbound traffic from RU
+
+  # ---- 入站 ICMP（每源限速 50/s，超限内核丢弃，防 ping flood） ----
+  # ---- 单源对 Web 的并发连接数限制（防单 IP 打满；内核 ct count 强制） ----

@@ -1,0 +1,19 @@
+[Unit]
+Description=gofw 网络层防火墙 (真下发引擎)
+Documentation=https://gitee.com/nights-shadow/fhq
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/gofw/start-gofw.sh
+Restart=on-failure
+RestartSec=5
+User=root
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=GOFW_WEB_PASSWORD=<已脱敏，实机见服务器 systemd 单元>
+MemoryMax=256M
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
